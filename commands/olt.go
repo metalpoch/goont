@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"goont/models"
 	"goont/snmp"
 	"goont/storage"
 	"os"
@@ -18,7 +19,9 @@ var OltList *cli.Command = &cli.Command{
 	Usage: "listar todos los OLT",
 	Action: func(ctx context.Context, c *cli.Command) error {
 		olts, err := getAllInfoOLTS()
-		if err != nil {	return err }
+		if err != nil {
+			return err
+		}
 		table := tablewriter.NewWriter(os.Stdout)
 		table.Header([]string{"IP", "Community", "Acronimo", "Ubicación", "Creado", "Actualizado"})
 		table.Bulk(olts)
@@ -66,7 +69,7 @@ var OltAdd *cli.Command = &cli.Command{
 
 		defer client.Close()
 
-		err = client.InsertOLT(storage.OLT{
+		err = client.InsertOLT(models.OLT{
 			IP:        ip,
 			Community: community,
 			Name:      info.SysName,

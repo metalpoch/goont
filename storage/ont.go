@@ -3,7 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"goont/snmp"
+	"goont/models"
 	"time"
 )
 
@@ -44,7 +44,7 @@ func (o *OntClient) Close() {
 	}
 }
 
-func (o *OntClient) BatchInsertOntMeasurements(measurements []snmp.Ont) error {
+func (o *OntClient) BatchInsertOntMeasurements(measurements []models.Ont) error {
 	if len(measurements) == 0 {
 		return nil
 	}
@@ -87,7 +87,7 @@ func (o *OntClient) BatchInsertOntMeasurements(measurements []snmp.Ont) error {
 	return nil
 }
 
-func (o *OntClient) GetMeasurements(startTime, endTime time.Time) ([]snmp.Ont, error) {
+func (o *OntClient) GetMeasurements(startTime, endTime time.Time) ([]models.Ont, error) {
 	rows, err := o.db.Query(`
         SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
                line_profile, control_ranging, control_run_status, temperature,
@@ -101,9 +101,9 @@ func (o *OntClient) GetMeasurements(startTime, endTime time.Time) ([]snmp.Ont, e
 	}
 	defer rows.Close()
 
-	var results []snmp.Ont
+	var results []models.Ont
 	for rows.Next() {
-		var m snmp.Ont
+		var m models.Ont
 		err := rows.Scan(
 			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
 			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
@@ -119,5 +119,86 @@ func (o *OntClient) GetMeasurements(startTime, endTime time.Time) ([]snmp.Ont, e
 		return nil, fmt.Errorf("rows iteration: %w", err)
 	}
 
+	if results == nil {
+		return []models.Ont{}, nil
+	}
+	return results, nil
+}
+
+// GetMeasurementsByGponInRange returns measurements filtered by GPON index within a time range.
+func (o *OntClient) GetMeasurementsByGpon(gponIdx int, startTime, endTime time.Time) ([]models.Ont, error) {
+	rows, err := o.db.Query(`
+        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
+               line_profile, control_ranging, control_run_status, temperature,
+               tx_power, rx_power, bytes_in, bytes_out
+        FROM ont_measurements
+        WHERE time BETWEEN ? AND ? AND gpon_idx = ?
+        ORDER BY time DESC
+    `, startTime, endTime, gponIdx)
+	if err != nil {
+		return nil, fmt.Errorf("query measurements by gpon: %w", err)
+	}
+	defer rows.Close()
+
+	var results []models.Ont
+	for rows.Next() {
+		var m models.Ont
+		err := rows.Scan(
+			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
+			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
+			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan measurement: %w", err)
+		}
+		results = append(results, m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	if results == nil {
+		return []models.Ont{}, nil
+	}
+	return results, nil
+}
+
+// GetMeasurementsByOntInRange returns measurements filtered by GPON index and ONT index within a time range.
+func (o *OntClient) GetMeasurementsByOnt(gponIdx, ontIdx int, startTime, endTime time.Time) ([]models.Ont, error) {
+	rows, err := o.db.Query(`
+        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
+               line_profile, control_ranging, control_run_status, temperature,
+               tx_power, rx_power, bytes_in, bytes_out
+        FROM ont_measurements
+        WHERE time BETWEEN ? AND ? AND gpon_idx = ? AND ont_idx = ?
+        ORDER BY time DESC
+    `, startTime, endTime, gponIdx, ontIdx)
+	if err != nil {
+		return nil, fmt.Errorf("query measurements by ont: %w", err)
+	}
+	defer rows.Close()
+
+	var results []models.Ont
+	for rows.Next() {
+		var m models.Ont
+		err := rows.Scan(
+			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
+			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
+			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan measurement: %w", err)
+		}
+		results = append(results, m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	if results == nil {
+		return []models.Ont{}, nil
+	}
 	return results, nil
 }

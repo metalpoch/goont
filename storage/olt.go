@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"goont/models"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -43,7 +44,7 @@ func (o *OltClient) Close() {
 	o.db.Close()
 }
 
-func (o *OltClient) InsertOLT(olt OLT) error {
+func (o *OltClient) InsertOLT(olt models.OLT) error {
 	timeoutSec := olt.Timeout
 	if timeoutSec == 0 {
 		timeoutSec = 60
@@ -75,8 +76,8 @@ func (o *OltClient) InsertOLT(olt OLT) error {
 	return nil
 }
 
-func (o *OltClient) GetOLTByID(ip string) (*InfoOLT, error) {
-	var olt InfoOLT
+func (o *OltClient) GetOLTByID(ip string) (*models.InfoOLT, error) {
+	var olt models.InfoOLT
 	err := o.db.QueryRow(`
 		SELECT ip, community, name, location, created_at, updated_at
 		FROM olts
@@ -93,7 +94,7 @@ func (o *OltClient) GetOLTByID(ip string) (*InfoOLT, error) {
 	return &olt, nil
 }
 
-func (o *OltClient) GetInfoOLTs() ([]InfoOLT, error) {
+func (o *OltClient) GetInfoOLTs() ([]models.InfoOLT, error) {
 	rows, err := o.db.Query(`
 		SELECT ip, community, name, location, created_at, updated_at
 		FROM olts
@@ -104,9 +105,9 @@ func (o *OltClient) GetInfoOLTs() ([]InfoOLT, error) {
 	}
 	defer rows.Close()
 
-	var olts []InfoOLT
+	var olts []models.InfoOLT
 	for rows.Next() {
-		var olt InfoOLT
+		var olt models.InfoOLT
 		err := rows.Scan(&olt.IP, &olt.Community, &olt.Name, &olt.Location, &olt.CreatedAt, &olt.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan olt: %w", err)
@@ -116,10 +117,13 @@ func (o *OltClient) GetInfoOLTs() ([]InfoOLT, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
+	if olts == nil {
+		return []models.InfoOLT{}, nil
+	}
 	return olts, nil
 }
 
-func (o *OltClient) GetOLTs() ([]OLT, error) {
+func (o *OltClient) GetOLTs() ([]models.OLT, error) {
 	rows, err := o.db.Query(`
 		SELECT 
 		  ip,
@@ -137,9 +141,9 @@ func (o *OltClient) GetOLTs() ([]OLT, error) {
 		return nil, fmt.Errorf("query olts: %w", err)
 	}
 	defer rows.Close()
-	var olts []OLT
+	var olts []models.OLT
 	for rows.Next() {
-		var olt OLT
+		var olt models.OLT
 		err := rows.Scan(&olt.IP, &olt.Community, &olt.Name, &olt.Location, &olt.Timeout, &olt.Retries, &olt.CreatedAt, &olt.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan olt: %w", err)
@@ -148,6 +152,9 @@ func (o *OltClient) GetOLTs() ([]OLT, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	if olts == nil {
+		return []models.OLT{}, nil
 	}
 	return olts, nil
 }

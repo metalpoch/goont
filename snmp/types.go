@@ -1,7 +1,5 @@
 package snmp
 
-import "time"
-
 const (
 	// Iftable & Systable
 	sysName     string = ".1.3.6.1.2.1.1.5.0"
@@ -45,21 +43,3 @@ type Gpon struct {
 }
 
 type ontMeasurement map[int]ont
-
-type Ont struct {
-	Time             time.Time
-	GponIdx          int
-	GponInterface    string
-
-	OntIdx           int
-	Despt            string
-	SerialNumber     string
-	LineProfName     string
-	ControlRanging   int32
-	ControlRunStatus int32
-	Temperature      int32
-	Tx               int32
-	Rx               int32
-	BytesIn          uint64
-	BytesOut         uint64
-}

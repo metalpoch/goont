@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"goont/models"
 	"goont/snmp"
 	"goont/storage"
 	"log"
@@ -11,7 +12,7 @@ import (
 	"time"
 )
 
-func getAllInfoOLTS() ([]storage.InfoOLT, error) {
+func getAllInfoOLTS() ([]models.InfoOLT, error) {
 	dir, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("Error al intentar obtener la ruta del ejecutable")
@@ -33,7 +34,7 @@ func getAllInfoOLTS() ([]storage.InfoOLT, error) {
 	return olts, nil
 }
 
-func getAllOLTS(dir string) ([]storage.OLT, error) {
+func getAllOLTS(dir string) ([]models.OLT, error) {
 	dbDir := filepath.Join(filepath.Dir(dir), "olt.db")
 	client, err := storage.NewOltDB(dbDir)
 	if err != nil {
@@ -50,7 +51,7 @@ func getAllOLTS(dir string) ([]storage.OLT, error) {
 	return olts, nil
 }
 
-func ontScanner(olt *snmp.Snmp) []snmp.Ont {
+func ontScanner(olt *snmp.Snmp) []models.Ont {
 	gponIfname, err := olt.IfNames()
 	if err != nil {
 		panic(err)
@@ -58,7 +59,7 @@ func ontScanner(olt *snmp.Snmp) []snmp.Ont {
 
 	now := time.Now()
 	sem := make(chan struct{}, 20)
-	ontsBuffer := make(chan []snmp.Ont, len(gponIfname))
+	ontsBuffer := make(chan []models.Ont, len(gponIfname))
 
 	var wg sync.WaitGroup
 
@@ -74,9 +75,9 @@ func ontScanner(olt *snmp.Snmp) []snmp.Ont {
 				return
 			}
 
-			onts := make([]snmp.Ont, 0, len(allOnt))
+			onts := make([]models.Ont, 0, len(allOnt))
 			for idx, ont := range allOnt {
-				onts = append(onts, snmp.Ont{
+				onts = append(onts, models.Ont{
 					Time:             now,
 					GponIdx:          g.Idx,
 					GponInterface:    g.IfName,
@@ -104,7 +105,7 @@ func ontScanner(olt *snmp.Snmp) []snmp.Ont {
 		close(ontsBuffer)
 	}()
 
-	var result []snmp.Ont
+	var result []models.Ont
 	for onts := range ontsBuffer {
 		result = append(result, onts...)
 	}
