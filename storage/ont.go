@@ -4,21 +4,28 @@ import (
 	"database/sql"
 	"fmt"
 	"goont/snmp"
-	"strings"
-	"sync"
 	"time"
 )
 
 type OntClient struct {
 	db *sql.DB
-	mu sync.Mutex
 }
 
 func NewOntDB(path string) (*OntClient, error) {
-	db, err := sql.Open("sqlite", path)
+	dsn := path + "?" +
+		"_pragma=journal_mode(WAL)&" +
+		"_pragma=busy_timeout(5000)&" +
+		"_pragma=synchronous=NORMAL&" +
+		"_pragma=foreign_keys=ON"
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
 
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
@@ -32,96 +39,85 @@ func NewOntDB(path string) (*OntClient, error) {
 }
 
 func (o *OntClient) Close() {
-	o.db.Close()
+	if o.db != nil {
+		o.db.Close()
+	}
 }
 
 func (o *OntClient) BatchInsertOntMeasurements(measurements []snmp.Ont) error {
-	const maxRetries = 5
-	initialDelay := 10 * time.Millisecond
+	if len(measurements) == 0 {
+		return nil
+	}
 
-	var lastErr error
-	for retry := 0; retry < maxRetries; retry++ {
-		if retry > 0 {
-			delay := initialDelay * (1 << (retry - 1)) // exponential backoff
-			time.Sleep(delay)
-		}
+	tx, err := o.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
 
-		o.mu.Lock()
+	defer tx.Rollback()
 
-		tx, err := o.db.Begin()
-		if err != nil {
-			o.mu.Unlock()
-			lastErr = fmt.Errorf("begin transaction: %w", err)
-			if isDBLocked(err) {
-				continue
-			}
-			return lastErr
-		}
-
-		stmt, err := tx.Prepare(`
+	stmt, err := tx.Prepare(`
 			INSERT INTO ont_measurements (
 				time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
 				line_profile, control_ranging, control_run_status, temperature,
   			tx_power, rx_power, bytes_in, bytes_out
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`)
-		if err != nil {
-			tx.Rollback()
-			o.mu.Unlock()
-			lastErr = fmt.Errorf("prepare statement: %w", err)
-			if isDBLocked(err) {
-				continue
-			}
-			return lastErr
-		}
-
-		allGood := true
-		for _, m := range measurements {
-			_, err := stmt.Exec(
-				m.Time, m.GponIdx, m.GponInterface, m.OntIdx, m.Despt, m.SerialNumber,
-				m.LineProfName, m.ControlRanging, m.ControlRunStatus, m.Temperature,
-				m.Tx, m.Rx, m.BytesIn, m.BytesOut,
-			)
-			if err != nil {
-				stmt.Close()
-				tx.Rollback()
-				o.mu.Unlock()
-				lastErr = fmt.Errorf("insert measurement: %w", err)
-				if isDBLocked(err) {
-					allGood = false
-					break
-				}
-				return lastErr
-			}
-		}
-
-		if !allGood {
-			stmt.Close()
-			tx.Rollback()
-			o.mu.Unlock()
-			continue
-		}
-
-		stmt.Close()
-		if err := tx.Commit(); err != nil {
-			o.mu.Unlock()
-			lastErr = fmt.Errorf("commit transaction: %w", err)
-			if isDBLocked(err) {
-				continue
-			}
-			return lastErr
-		}
-
-		o.mu.Unlock()
-		return nil
+	if err != nil {
+		return fmt.Errorf("prepare statement: %w", err)
 	}
 
-	return fmt.Errorf("max retries exceeded: %w", lastErr)
+	defer stmt.Close()
+
+	for _, m := range measurements {
+		_, err := stmt.Exec(
+			m.Time, m.GponIdx, m.GponInterface, m.OntIdx, m.Despt, m.SerialNumber,
+			m.LineProfName, m.ControlRanging, m.ControlRunStatus, m.Temperature,
+			m.Tx, m.Rx, m.BytesIn, m.BytesOut,
+		)
+		if err != nil {
+			return fmt.Errorf("insert measurement: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
 }
 
-func isDBLocked(err error) bool {
-	errStr := err.Error()
-	return strings.Contains(errStr, "database is locked") ||
-		strings.Contains(errStr, "SQLITE_BUSY") ||
-		strings.Contains(errStr, "database locked")
+func (o *OntClient) GetMeasurements(startTime, endTime time.Time) ([]snmp.Ont, error) {
+	rows, err := o.db.Query(`
+        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
+               line_profile, control_ranging, control_run_status, temperature,
+               tx_power, rx_power, bytes_in, bytes_out
+        FROM ont_measurements
+        WHERE time BETWEEN ? AND ?
+        ORDER BY time DESC
+    `, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("query measurements: %w", err)
+	}
+	defer rows.Close()
+
+	var results []snmp.Ont
+	for rows.Next() {
+		var m snmp.Ont
+		err := rows.Scan(
+			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
+			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
+			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan measurement: %w", err)
+		}
+		results = append(results, m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return results, nil
 }

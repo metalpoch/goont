@@ -70,7 +70,7 @@ func ontScanner(olt *snmp.Snmp) []snmp.Ont {
 
 			allOnt, err := olt.OntQuery(g)
 			if err != nil {
-				log.Printf("error al ejecutar las consultas a los ont del puerto %d (%s): %v\n", g.Idx, g.IfName, err)
+				log.Printf("error al ejecutar las consultas a los ont de %s del puerto %d (%s): %v\n", olt.IP, g.Idx, g.IfName, err)
 				return
 			}
 
