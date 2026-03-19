@@ -282,7 +282,7 @@ func processGponTraffic(measurements []models.Ont) models.GponResponse {
 	result := make(models.GponResponse)
 
 	for gponIdx, hourMap := range accum {
-		var entries []models.GponResponse
+		var entries []models.GponMeasurement
 		for _, entry := range hourMap {
 			entries = append(entries, *entry)
 		}
