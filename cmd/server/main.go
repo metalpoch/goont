@@ -66,8 +66,8 @@ func setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/olt", handlers.GetAllOLT)
 	mux.HandleFunc("GET /api/v1/olt/{ip}", handlers.GetOLT)
 
-	mux.HandleFunc("GET /api/v1/traffic/{ip}", handlers.GetTrafficOLT)
-	mux.HandleFunc("GET /api/v1/traffic/{ip}/{gpon}", handlers.GetTrafficGpon)
+	mux.HandleFunc("GET /api/v1/traffic/{ip}", handlers.GetTrafficGpons)
+	mux.HandleFunc("GET /api/v1/traffic/{ip}/{gpon}", handlers.GetTrafficONTS)
 	mux.HandleFunc("GET /api/v1/traffic/{ip}/{gpon}/{ont}", handlers.GetTrafficONT)
 
 	mux.HandleFunc("GET /api/v1/health", handlers.HealthCheck)

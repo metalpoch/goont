@@ -87,44 +87,6 @@ func (o *OntClient) BatchInsertOntMeasurements(measurements []models.Ont) error 
 	return nil
 }
 
-func (o *OntClient) GetMeasurements(startTime, endTime time.Time) ([]models.Ont, error) {
-	rows, err := o.db.Query(`
-        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
-               line_profile, control_ranging, control_run_status, temperature,
-               tx_power, rx_power, bytes_in, bytes_out
-        FROM ont_measurements
-        WHERE time BETWEEN ? AND ?
-        ORDER BY time ASC
-    `, startTime, endTime)
-	if err != nil {
-		return nil, fmt.Errorf("query measurements: %w", err)
-	}
-	defer rows.Close()
-
-	var results []models.Ont
-	for rows.Next() {
-		var m models.Ont
-		err := rows.Scan(
-			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
-			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
-			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scan measurement: %w", err)
-		}
-		results = append(results, m)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration: %w", err)
-	}
-
-	if results == nil {
-		return []models.Ont{}, nil
-	}
-	return results, nil
-}
-
 // GetMeasurementsByGponInRange returns measurements filtered by GPON index within a time range.
 func (o *OntClient) GetMeasurementsByGpon(gponIdx int, startTime, endTime time.Time) ([]models.Ont, error) {
 	rows, err := o.db.Query(`
@@ -176,6 +138,45 @@ func (o *OntClient) GetMeasurementsByOnt(gponIdx, ontIdx int, startTime, endTime
     `, startTime, endTime, gponIdx, ontIdx)
 	if err != nil {
 		return nil, fmt.Errorf("query measurements by ont: %w", err)
+	}
+	defer rows.Close()
+
+	var results []models.Ont
+	for rows.Next() {
+		var m models.Ont
+		err := rows.Scan(
+			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
+			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
+			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan measurement: %w", err)
+		}
+		results = append(results, m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	if results == nil {
+		return []models.Ont{}, nil
+	}
+	return results, nil
+}
+
+// GetAllMeasurements returns all measurements within a time range.
+func (o *OntClient) GetAllMeasurements(startTime, endTime time.Time) ([]models.Ont, error) {
+	rows, err := o.db.Query(`
+        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
+               line_profile, control_ranging, control_run_status, temperature,
+               tx_power, rx_power, bytes_in, bytes_out
+        FROM ont_measurements
+        WHERE time BETWEEN ? AND ?
+        ORDER BY time ASC
+    `, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("query all measurements: %w", err)
 	}
 	defer rows.Close()
 

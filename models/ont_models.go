@@ -2,6 +2,18 @@ package models
 
 import "time"
 
+type GponMeasurement struct {
+	Time          time.Time `json:"time"`
+	GponInterface string    `json:"gpon_interface"`
+	TotalBytesIn  uint64    `json:"total_bytes_in"`
+	TotalBytesOut uint64    `json:"total_bytes_out"`
+	TotalBpsIn    float64   `json:"total_bps_in"`
+	TotalBpsOut   float64   `json:"total_bps_out"`
+	CountActive   int       `json:"count_active"`
+	CountInactive int       `json:"count_inactive"`
+	CountError    int       `json:"count_error"`
+}
+
 type Ont struct {
 	Time             time.Time `json:"time"`
 	GponIdx          int       `json:"gpon_idx"`
@@ -19,16 +31,6 @@ type Ont struct {
 	BytesOut         uint64    `json:"bytes_out"`
 }
 
-type GponMeasurement struct {
-	Time          time.Time `json:"time"`
-	GponIdx       int       `json:"gpon_idx"`
-	GponInterface string    `json:"gpon_interface"`
-	BpsIn         float64   `json:"bps_in"`
-	BpsOut        float64   `json:"bps_out"`
-	BytesIn       uint64    `json:"bytes_in"`
-	BytesOut      uint64    `json:"bytes_out"`
-}
-
 type OntMeasurement struct {
 	Time         time.Time `json:"time"`
 	Status       int8      `json:"status"`
@@ -44,6 +46,8 @@ type OntMeasurement struct {
 	SerialNumber string    `json:"serial_number"`
 	Plan         string    `json:"plan"`
 }
-type GponGrouped map[int][]Ont              // GponIdx as key
+
 type OntGrouped map[uint8][]Ont             // OntIdx as key
 type OntResponse map[uint8][]OntMeasurement // OntIdx as key
+
+type GponResponse map[int][]GponMeasurement // GponIdx as key

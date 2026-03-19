@@ -22,40 +22,7 @@ func getOntDB(ip string) (*storage.OntClient, error) {
 	return client, nil
 }
 
-func GetTrafficOLT(w http.ResponseWriter, r *http.Request) {
-	ip := r.PathValue("ip")
-	if ip == "" {
-		http.Error(w, "IP parameter required", http.StatusBadRequest)
-		return
-	}
-
-	initDateStr := r.URL.Query().Get("initDate")
-	endDateStr := r.URL.Query().Get("endDate")
-
-	dates, err := parseDate(initDateStr, endDateStr)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	client, err := getOntDB(ip)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer client.Close()
-
-	measurements, err := client.GetMeasurements(dates.InitDate, dates.EndDate)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(measurements)
-}
-
-func GetTrafficGpon(w http.ResponseWriter, r *http.Request) {
+func GetTrafficONTS(w http.ResponseWriter, r *http.Request) {
 	ip := r.PathValue("ip")
 	gponStr := r.PathValue("gpon")
 	if ip == "" || gponStr == "" {
@@ -140,6 +107,41 @@ func GetTrafficONT(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := proccessOnt(measurements)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func GetTrafficGpons(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+	if ip == "" {
+		http.Error(w, "IP parameter required", http.StatusBadRequest)
+		return
+	}
+
+	initDateStr := r.URL.Query().Get("initDate")
+	endDateStr := r.URL.Query().Get("endDate")
+
+	dates, err := parseDate(initDateStr, endDateStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	client, err := getOntDB(ip)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer client.Close()
+
+	measurements, err := client.GetAllMeasurements(dates.InitDate, dates.EndDate)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response := processGponTraffic(measurements)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)

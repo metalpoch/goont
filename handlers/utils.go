@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"goont/models"
 	"math"
+	"sort"
 	"sync"
 	"time"
 )
@@ -67,19 +68,19 @@ func proccessOnt(measurements []models.Ont) []models.OntMeasurement {
 
 	for prev, measurement := range measurements[1:] {
 		var temp, distance, status, tx, rx int32
-		if temp != math.MaxInt32 {
+		if measurement.Temperature != math.MaxInt32 {
 			temp = measurement.Temperature
 		}
-		if distance != math.MaxInt32 {
+		if measurement.ControlRanging != math.MaxInt32 {
 			distance = measurement.ControlRanging
 		}
-		if status != math.MaxInt32 {
+		if measurement.ControlRunStatus != math.MaxInt32 {
 			status = measurement.ControlRunStatus
 		}
-		if tx != math.MaxInt32 {
+		if measurement.Tx != math.MaxInt32 {
 			tx = measurement.Tx
 		}
-		if rx != math.MaxInt32 {
+		if measurement.Rx != math.MaxInt32 {
 			rx = measurement.Rx
 		}
 
@@ -130,19 +131,19 @@ func proccessGroupedOnt(measurements []models.Ont) models.OntResponse {
 			ont := response[idx]
 			for prev, measurement := range measurements[1:] {
 				var temp, distance, status, tx, rx int32
-				if temp != math.MaxInt32 {
+				if measurement.Temperature != math.MaxInt32 {
 					temp = measurement.Temperature
 				}
-				if distance != math.MaxInt32 {
+				if measurement.ControlRanging != math.MaxInt32 {
 					distance = measurement.ControlRanging
 				}
-				if status != math.MaxInt32 {
+				if measurement.ControlRunStatus != math.MaxInt32 {
 					status = measurement.ControlRunStatus
 				}
-				if tx != math.MaxInt32 {
+				if measurement.Tx != math.MaxInt32 {
 					tx = measurement.Tx
 				}
-				if rx != math.MaxInt32 {
+				if measurement.Rx != math.MaxInt32 {
 					rx = measurement.Rx
 				}
 
@@ -183,4 +184,114 @@ func proccessGroupedOnt(measurements []models.Ont) models.OntResponse {
 	wg.Wait()
 
 	return response
+}
+
+func processGponTraffic(measurements []models.Ont) models.GponResponse {
+	// Group by (gpon_idx, ont_idx)
+	grouped := make(map[int]map[int][]models.Ont)
+	for _, m := range measurements {
+		if _, ok := grouped[m.GponIdx]; !ok {
+			grouped[m.GponIdx] = make(map[int][]models.Ont)
+		}
+		grouped[m.GponIdx][m.OntIdx] = append(grouped[m.GponIdx][m.OntIdx], m)
+	}
+
+	// Map to accumulate hourly traffic per GPON
+	// Key: gpon_idx -> hour -> accumulator
+	accum := make(map[int]map[time.Time]*models.GponMeasurement)
+	// Store gpon_interface per GPON
+	gponInterfaces := make(map[int]string)
+	// Map to track status per ONT per hour (gpon_idx -> hour -> ont_idx -> status)
+	statusMap := make(map[int]map[time.Time]map[int]int8)
+
+	for gponIdx, ontMap := range grouped {
+		for _, ontMeasurements := range ontMap {
+			// Sort by time (already sorted from DB)
+			for i := 1; i < len(ontMeasurements); i++ {
+				prev := ontMeasurements[i-1]
+				curr := ontMeasurements[i]
+
+				// Calculate deltas
+				deltaDuration := curr.Time.Sub(prev.Time)
+				bytesIn := deltaBytes(prev.BytesIn, curr.BytesIn)
+				bytesOut := deltaBytes(prev.BytesOut, curr.BytesOut)
+				bpsIn := calculateBPS(bytesIn, deltaDuration)
+				bpsOut := calculateBPS(bytesOut, deltaDuration)
+
+				// Determine status from current measurement
+				status := int8(0)
+				if curr.ControlRunStatus != math.MaxInt32 {
+					status = int8(curr.ControlRunStatus)
+				}
+
+				// Truncate to hour
+				hour := curr.Time.Truncate(time.Hour)
+
+				// Initialize accum maps if needed
+				if _, ok := accum[gponIdx]; !ok {
+					accum[gponIdx] = make(map[time.Time]*models.GponMeasurement)
+				}
+				if _, ok := accum[gponIdx][hour]; !ok {
+					// Store gpon_interface (take from first measurement)
+					if gponInterfaces[gponIdx] == "" && len(ontMeasurements) > 0 {
+						gponInterfaces[gponIdx] = ontMeasurements[0].GponInterface
+					}
+					accum[gponIdx][hour] = &models.GponMeasurement{
+						GponInterface: gponInterfaces[gponIdx],
+						Time:          hour,
+					}
+				}
+
+				// Add to totals
+				entry := accum[gponIdx][hour]
+				entry.TotalBytesIn += bytesIn
+				entry.TotalBytesOut += bytesOut
+				entry.TotalBpsIn += bpsIn
+				entry.TotalBpsOut += bpsOut
+
+				// Register status for this ONT at this hour
+				if statusMap[gponIdx] == nil {
+					statusMap[gponIdx] = make(map[time.Time]map[int]int8)
+				}
+				if statusMap[gponIdx][hour] == nil {
+					statusMap[gponIdx][hour] = make(map[int]int8)
+				}
+				statusMap[gponIdx][hour][curr.OntIdx] = status
+			}
+		}
+	}
+
+	// Count statuses per GPON per hour
+	for gponIdx, hourMap := range statusMap {
+		for hour, ontStatusMap := range hourMap {
+			entry := accum[gponIdx][hour]
+			for _, status := range ontStatusMap {
+				switch status {
+				case 1:
+					entry.CountActive++
+				case 2:
+					entry.CountInactive++
+				case -1:
+					entry.CountError++
+				}
+			}
+		}
+	}
+
+	// Build map gpon_idx -> sorted list by hour
+	result := make(models.GponResponse)
+
+	for gponIdx, hourMap := range accum {
+		var entries []models.GponResponse
+		for _, entry := range hourMap {
+			entries = append(entries, *entry)
+		}
+		// Sort entries by hour ascending
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].Time.Before(entries[j].Time)
+		})
+		result[gponIdx] = entries
+	}
+
+	return result
 }
