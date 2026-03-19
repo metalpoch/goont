@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"time"
 )
 
 func getOntDB(ip string) (*storage.OntClient, error) {
@@ -23,15 +22,6 @@ func getOntDB(ip string) (*storage.OntClient, error) {
 	return client, nil
 }
 
-// parseTimeParam parses a time parameter from query string.
-// Supports RFC3339 format (e.g., "2006-01-02T15:04:05Z07:00").
-func parseTimeParam(param string) (time.Time, error) {
-	if param == "" {
-		return time.Time{}, nil
-	}
-	return time.Parse(time.RFC3339, param)
-}
-
 func GetTrafficOLT(w http.ResponseWriter, r *http.Request) {
 	ip := r.PathValue("ip")
 	if ip == "" {
@@ -39,29 +29,12 @@ func GetTrafficOLT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse time parameters
 	initDateStr := r.URL.Query().Get("initDate")
 	endDateStr := r.URL.Query().Get("endDate")
 
-	if initDateStr == "" || endDateStr == "" {
-		http.Error(w, "Both initDate and endDate must be provided when using date range", http.StatusBadRequest)
-		return
-	}
-
-	initTime, err := parseTimeParam(initDateStr)
+	dates, err := parseDate(initDateStr, endDateStr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid initDate format: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	endTime, err := parseTimeParam(endDateStr)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid endDate format: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	if endTime.Before(initTime) {
-		http.Error(w, "endDate must be after initDate", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -72,7 +45,7 @@ func GetTrafficOLT(w http.ResponseWriter, r *http.Request) {
 	}
 	defer client.Close()
 
-	measurements, err := client.GetMeasurements(initTime, endTime)
+	measurements, err := client.GetMeasurements(dates.InitDate, dates.EndDate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -99,24 +72,9 @@ func GetTrafficGpon(w http.ResponseWriter, r *http.Request) {
 	initDateStr := r.URL.Query().Get("initDate")
 	endDateStr := r.URL.Query().Get("endDate")
 
-	if initDateStr == "" || endDateStr == "" {
-		http.Error(w, "Both initDate and endDate must be provided when using date range", http.StatusBadRequest)
-		return
-	}
-
-	initTime, err := parseTimeParam(initDateStr)
+	dates, err := parseDate(initDateStr, endDateStr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid initDate format: %v", err), http.StatusBadRequest)
-		return
-	}
-	endTime, err := parseTimeParam(endDateStr)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid endDate format: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	if endTime.Before(initTime) {
-		http.Error(w, "endDate must be after initDate", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -127,14 +85,16 @@ func GetTrafficGpon(w http.ResponseWriter, r *http.Request) {
 	}
 	defer client.Close()
 
-	measurements, err := client.GetMeasurementsByGpon(gponIdx, initTime, endTime)
+	measurements, err := client.GetMeasurementsByGpon(gponIdx, dates.InitDate, dates.EndDate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	response := proccessGroupedOnt(measurements)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(measurements)
+	json.NewEncoder(w).Encode(response)
 }
 
 func GetTrafficONT(w http.ResponseWriter, r *http.Request) {
@@ -157,28 +117,12 @@ func GetTrafficONT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse time parameters
 	initDateStr := r.URL.Query().Get("initDate")
 	endDateStr := r.URL.Query().Get("endDate")
 
-	if initDateStr == "" || endDateStr == "" {
-		http.Error(w, "Both initDate and endDate must be provided when using date range", http.StatusBadRequest)
-		return
-	}
-
-	initTime, err := parseTimeParam(initDateStr)
+	dates, err := parseDate(initDateStr, endDateStr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid initDate format: %v", err), http.StatusBadRequest)
-		return
-	}
-	endTime, err := parseTimeParam(endDateStr)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid endDate format: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	if endTime.Before(initTime) {
-		http.Error(w, "endDate must be after initDate", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -189,12 +133,14 @@ func GetTrafficONT(w http.ResponseWriter, r *http.Request) {
 	}
 	defer client.Close()
 
-	measurements, err := client.GetMeasurementsByOnt(gponIdx, ontIdx, initTime, endTime)
+	measurements, err := client.GetMeasurementsByOnt(gponIdx, ontIdx, dates.InitDate, dates.EndDate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	response := proccessOnt(measurements)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(measurements)
+	json.NewEncoder(w).Encode(response)
 }

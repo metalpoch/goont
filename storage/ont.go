@@ -94,7 +94,7 @@ func (o *OntClient) GetMeasurements(startTime, endTime time.Time) ([]models.Ont,
                tx_power, rx_power, bytes_in, bytes_out
         FROM ont_measurements
         WHERE time BETWEEN ? AND ?
-        ORDER BY time DESC
+        ORDER BY time ASC
     `, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("query measurements: %w", err)
@@ -133,7 +133,7 @@ func (o *OntClient) GetMeasurementsByGpon(gponIdx int, startTime, endTime time.T
                tx_power, rx_power, bytes_in, bytes_out
         FROM ont_measurements
         WHERE time BETWEEN ? AND ? AND gpon_idx = ?
-        ORDER BY time DESC
+        ORDER BY time ASC
     `, startTime, endTime, gponIdx)
 	if err != nil {
 		return nil, fmt.Errorf("query measurements by gpon: %w", err)
@@ -172,7 +172,7 @@ func (o *OntClient) GetMeasurementsByOnt(gponIdx, ontIdx int, startTime, endTime
                tx_power, rx_power, bytes_in, bytes_out
         FROM ont_measurements
         WHERE time BETWEEN ? AND ? AND gpon_idx = ? AND ont_idx = ?
-        ORDER BY time DESC
+        ORDER BY time ASC
     `, startTime, endTime, gponIdx, ontIdx)
 	if err != nil {
 		return nil, fmt.Errorf("query measurements by ont: %w", err)
