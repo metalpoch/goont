@@ -51,3 +51,17 @@ type OntGrouped map[uint8][]Ont             // OntIdx as key
 type OntResponse map[uint8][]OntMeasurement // OntIdx as key
 
 type GponResponse map[int][]GponMeasurement // GponIdx as key
+
+type OntStatusCount struct {
+	Active   int `json:"active"`
+	Inactive int `json:"inactive"`
+	Error    int `json:"error"`
+}
+
+type OntStatusByGpon struct {
+	GponInterface string         `json:"gpon_interface"`
+	GponIdx       int            `json:"gpon_idx"`
+	Status        OntStatusCount `json:"status"`
+}
+
+type OntStatusGlobal []OntStatusByGpon

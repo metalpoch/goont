@@ -203,3 +203,84 @@ func (o *OntClient) GetAllMeasurements(startTime, endTime time.Time) ([]models.O
 	}
 	return results, nil
 }
+
+// GetMeasurementsByDateRange returns all measurements within a specific date range (no GPON filter).
+func (o *OntClient) GetMeasurementsByDateRange(startTime, endTime time.Time) ([]models.Ont, error) {
+	rows, err := o.db.Query(`
+        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
+               line_profile, control_ranging, control_run_status, temperature,
+               tx_power, rx_power, bytes_in, bytes_out
+        FROM ont_measurements
+        WHERE time BETWEEN ? AND ?
+        ORDER BY time ASC
+    `, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("query measurements by date range: %w", err)
+	}
+	defer rows.Close()
+
+	var results []models.Ont
+	for rows.Next() {
+		var m models.Ont
+		err := rows.Scan(
+			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
+			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
+			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan measurement: %w", err)
+		}
+		results = append(results, m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	if results == nil {
+		return []models.Ont{}, nil
+	}
+	return results, nil
+}
+
+// GetLastMeasurementBeforeDate returns the last measurement for each ONT before a specific date.
+func (o *OntClient) GetLastMeasurementBeforeDate(beforeTime time.Time) (map[int]models.Ont, error) {
+	rows, err := o.db.Query(`
+        SELECT m.time, m.gpon_idx, m.gpon_interface, m.ont_idx, m.despt, m.serial_number,
+               m.line_profile, m.control_ranging, m.control_run_status, m.temperature,
+               m.tx_power, m.rx_power, m.bytes_in, m.bytes_out
+        FROM ont_measurements m
+        INNER JOIN (
+            SELECT gpon_idx, ont_idx, MAX(time) as max_time
+            FROM ont_measurements
+            WHERE time < ?
+            GROUP BY gpon_idx, ont_idx
+        ) latest ON m.gpon_idx = latest.gpon_idx AND m.ont_idx = latest.ont_idx AND m.time = latest.max_time
+        ORDER BY m.gpon_idx, m.ont_idx
+    `, beforeTime)
+	if err != nil {
+		return nil, fmt.Errorf("query last measurements: %w", err)
+	}
+	defer rows.Close()
+
+	results := make(map[int]models.Ont)
+	for rows.Next() {
+		var m models.Ont
+		err := rows.Scan(
+			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
+			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
+			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan measurement: %w", err)
+		}
+		key := m.GponIdx*1000 + m.OntIdx
+		results[key] = m
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return results, nil
+}
