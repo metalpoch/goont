@@ -5,7 +5,6 @@ import (
 	"goont/models"
 	"math"
 	"sort"
-	"sync"
 	"time"
 )
 
@@ -123,65 +122,50 @@ func proccessGroupedOnt(measurements []models.Ont) models.OntResponse {
 		groups[id] = r
 	}
 
-	var wg sync.WaitGroup
-	var mux sync.Mutex
-
 	for idx, measurements := range groups {
-		wg.Go(func() {
-			ont := response[idx]
-			for prev, measurement := range measurements[1:] {
-				var temp, distance, status, tx, rx int32
-				if measurement.Temperature != math.MaxInt32 {
-					temp = measurement.Temperature
-				}
-				if measurement.ControlRanging != math.MaxInt32 {
-					distance = measurement.ControlRanging
-				}
-				if measurement.ControlRunStatus != math.MaxInt32 {
-					status = measurement.ControlRunStatus
-				}
-				if measurement.Tx != math.MaxInt32 {
-					tx = measurement.Tx
-				}
-				if measurement.Rx != math.MaxInt32 {
-					rx = measurement.Rx
-				}
-
-				deltaDuration := measurement.Time.Sub(measurements[prev].Time)
-				bytesIn := deltaBytes(measurements[prev].BytesIn, measurement.BytesIn)
-				bytesOut := deltaBytes(measurements[prev].BytesOut, measurement.BytesOut)
-				bpsIn := calculateBPS(bytesIn, deltaDuration)
-				bpsOut := calculateBPS(bytesOut, deltaDuration)
-
-				m := models.OntMeasurement{
-					Time:         measurement.Time,
-					Status:       int8(status),
-					Temperature:  int8(temp),
-					OltDistance:  int16(distance),
-					Tx:           float64(tx) / 100,
-					Rx:           float64(rx) / 100,
-					DNI:          measurement.Despt,
-					SerialNumber: measurement.SerialNumber,
-					Plan:         measurement.LineProfName,
-					BytesIn:      bytesIn,
-					BytesOut:     bytesOut,
-					BpsIn:        bpsIn,
-					BpsOut:       bpsOut,
-				}
-
-				mux.Lock()
-				ont = append(ont, m)
-				mux.Unlock()
+		for prev, measurement := range measurements[1:] {
+			var temp, distance, status, tx, rx int32
+			if measurement.Temperature != math.MaxInt32 {
+				temp = measurement.Temperature
+			}
+			if measurement.ControlRanging != math.MaxInt32 {
+				distance = measurement.ControlRanging
+			}
+			if measurement.ControlRunStatus != math.MaxInt32 {
+				status = measurement.ControlRunStatus
+			}
+			if measurement.Tx != math.MaxInt32 {
+				tx = measurement.Tx
+			}
+			if measurement.Rx != math.MaxInt32 {
+				rx = measurement.Rx
 			}
 
-			mux.Lock()
-			response[idx] = ont
-			mux.Unlock()
-		})
+			deltaDuration := measurement.Time.Sub(measurements[prev].Time)
+			bytesIn := deltaBytes(measurements[prev].BytesIn, measurement.BytesIn)
+			bytesOut := deltaBytes(measurements[prev].BytesOut, measurement.BytesOut)
+			bpsIn := calculateBPS(bytesIn, deltaDuration)
+			bpsOut := calculateBPS(bytesOut, deltaDuration)
 
+			m := models.OntMeasurement{
+				Time:         measurement.Time,
+				Status:       int8(status),
+				Temperature:  int8(temp),
+				OltDistance:  int16(distance),
+				Tx:           float64(tx) / 100,
+				Rx:           float64(rx) / 100,
+				DNI:          measurement.Despt,
+				SerialNumber: measurement.SerialNumber,
+				Plan:         measurement.LineProfName,
+				BytesIn:      bytesIn,
+				BytesOut:     bytesOut,
+				BpsIn:        bpsIn,
+				BpsOut:       bpsOut,
+			}
+
+			response[idx] = append(response[idx], m)
+		}
 	}
-
-	wg.Wait()
 
 	return response
 }

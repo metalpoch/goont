@@ -71,6 +71,4 @@ func setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/traffic/{ip}/{gpon}/{ont}", handlers.GetTrafficONT)
 
 	mux.HandleFunc("GET /api/v1/health", handlers.HealthCheck)
-	mux.HandleFunc("GET /", handlers.HomePage)
-
 }

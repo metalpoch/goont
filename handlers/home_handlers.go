@@ -19,13 +19,3 @@ func HealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }
-
-// HomePage - Página de inicio
-func HomePage(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-
-	fmt.Fprintf(w, "Bienvenido a mi API REST")
-}
