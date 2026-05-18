@@ -186,7 +186,7 @@ func GetOntStatusByDate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer client.Close()
 
-	measurements, err := client.GetMeasurementsByGpon(gponIdx, startOfDay, endOfDay)
+	activeOnts, err := client.GetActiveONTsInGponRange(gponIdx, startOfDay, endOfDay)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -198,7 +198,7 @@ func GetOntStatusByDate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := calculateOntStatus(measurements, lastMeasurements, gponIdx)
+	status := calculateOntStatus(activeOnts, lastMeasurements, gponIdx)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
@@ -233,7 +233,7 @@ func GetOntStatusByOlt(w http.ResponseWriter, r *http.Request) {
 	}
 	defer client.Close()
 
-	measurements, err := client.GetMeasurementsByDateRange(startOfDay, endOfDay)
+	activeOnts, err := client.GetActiveONTsInRange(startOfDay, endOfDay)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -245,23 +245,15 @@ func GetOntStatusByOlt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := calculateOntStatusTotal(measurements, lastMeasurements)
+	status := calculateOntStatusTotal(activeOnts, lastMeasurements)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
 }
 
-func calculateOntStatus(measurements []models.Ont, lastMeasurements map[int]models.Ont, gponIdx int) models.OntStatusCount {
-	activeOnts := make(map[int]bool)
+func calculateOntStatus(activeOnts map[int]bool, lastMeasurements map[int]models.Ont, gponIdx int) models.OntStatusCount {
 	inactiveOnts := make(map[int]bool)
 	errorOnts := make(map[int]bool)
-
-	for _, m := range measurements {
-		key := m.GponIdx*1000 + m.OntIdx
-		if m.ControlRunStatus == 1 {
-			activeOnts[key] = true
-		}
-	}
 
 	for key, m := range lastMeasurements {
 		if m.GponIdx != gponIdx {
@@ -285,17 +277,9 @@ func calculateOntStatus(measurements []models.Ont, lastMeasurements map[int]mode
 	}
 }
 
-func calculateOntStatusTotal(measurements []models.Ont, lastMeasurements map[int]models.Ont) models.OntStatusCount {
-	activeOnts := make(map[int]bool)
+func calculateOntStatusTotal(activeOnts map[int]bool, lastMeasurements map[int]models.Ont) models.OntStatusCount {
 	inactiveOnts := make(map[int]bool)
 	errorOnts := make(map[int]bool)
-
-	for _, m := range measurements {
-		key := m.GponIdx*1000 + m.OntIdx
-		if m.ControlRunStatus == 1 {
-			activeOnts[key] = true
-		}
-	}
 
 	for key, m := range lastMeasurements {
 		if _, wasActive := activeOnts[key]; wasActive {

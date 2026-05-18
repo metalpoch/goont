@@ -243,6 +243,64 @@ func (o *OntClient) GetMeasurementsByDateRange(startTime, endTime time.Time) ([]
 	return results, nil
 }
 
+// GetActiveONTsInRange returns distinct (gpon_idx, ont_idx) pairs that were active in the time range.
+func (o *OntClient) GetActiveONTsInRange(startTime, endTime time.Time) (map[int]bool, error) {
+	rows, err := o.db.Query(`
+		SELECT DISTINCT gpon_idx, ont_idx
+		FROM ont_measurements
+		WHERE time BETWEEN ? AND ? AND control_run_status = 1
+	`, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("query active onts: %w", err)
+	}
+	defer rows.Close()
+
+	results := make(map[int]bool)
+	for rows.Next() {
+		var gponIdx, ontIdx int
+		if err := rows.Scan(&gponIdx, &ontIdx); err != nil {
+			return nil, fmt.Errorf("scan active ont: %w", err)
+		}
+		key := gponIdx*1000 + ontIdx
+		results[key] = true
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return results, nil
+}
+
+// GetActiveONTsInGponRange returns distinct (gpon_idx, ont_idx) pairs that were active in the time range for a specific GPON.
+func (o *OntClient) GetActiveONTsInGponRange(gponIdx int, startTime, endTime time.Time) (map[int]bool, error) {
+	rows, err := o.db.Query(`
+		SELECT DISTINCT gpon_idx, ont_idx
+		FROM ont_measurements
+		WHERE time BETWEEN ? AND ? AND gpon_idx = ? AND control_run_status = 1
+	`, startTime, endTime, gponIdx)
+	if err != nil {
+		return nil, fmt.Errorf("query active onts by gpon: %w", err)
+	}
+	defer rows.Close()
+
+	results := make(map[int]bool)
+	for rows.Next() {
+		var gponIdxRow, ontIdx int
+		if err := rows.Scan(&gponIdxRow, &ontIdx); err != nil {
+			return nil, fmt.Errorf("scan active ont: %w", err)
+		}
+		key := gponIdxRow*1000 + ontIdx
+		results[key] = true
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return results, nil
+}
+
 // GetLastMeasurementBeforeDate returns the last measurement for each ONT before a specific date.
 func (o *OntClient) GetLastMeasurementBeforeDate(beforeTime time.Time) (map[int]models.Ont, error) {
 	rows, err := o.db.Query(`
