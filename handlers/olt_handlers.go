@@ -2,41 +2,19 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"goont/storage"
 	"net/http"
-	"os"
-	"path/filepath"
 )
 
-var dataDir string
+var store *storage.Store
 
-func SetDataDir(dir string) {
-	dataDir = dir
-}
-
-func getOltDB() (*storage.OltClient, error) {
-	dbPath := filepath.Join(dataDir, "olt.db")
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("OLT database not found")
-	}
-	client, err := storage.NewOltDB(dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open OLT database: %w", err)
-	}
-	return client, nil
+func SetStore(s *storage.Store) {
+	store = s
 }
 
 // GetAllOLT - Obtener todos los olt en medicion
 func GetAllOLT(w http.ResponseWriter, r *http.Request) {
-	client, err := getOltDB()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer client.Close()
-
-	olts, err := client.GetInfoOLTs()
+	olts, err := store.GetInfoOLTs(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -54,14 +32,7 @@ func GetOLT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := getOltDB()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer client.Close()
-
-	olt, err := client.GetOLTByID(ip)
+	olt, err := store.GetOLTByID(r.Context(), ip)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

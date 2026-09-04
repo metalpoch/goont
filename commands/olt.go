@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"goont/models"
 	"goont/snmp"
-	"goont/storage"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/olekukonko/tablewriter"
@@ -18,10 +16,17 @@ var OltList *cli.Command = &cli.Command{
 	Name:  "list",
 	Usage: "listar todos los OLT",
 	Action: func(ctx context.Context, c *cli.Command) error {
-		olts, err := getAllInfoOLTS()
+		store, cleanup, err := newStore(ctx)
 		if err != nil {
 			return err
 		}
+		defer cleanup()
+
+		olts, err := store.GetInfoOLTs(ctx)
+		if err != nil {
+			return fmt.Errorf("Error al intentar obtener todos los OLT: %v", err)
+		}
+
 		table := tablewriter.NewWriter(os.Stdout)
 		table.Header([]string{"IP", "Community", "Acronimo", "Ubicación", "Creado", "Actualizado"})
 		table.Bulk(olts)
@@ -50,26 +55,20 @@ var OltAdd *cli.Command = &cli.Command{
 			return fmt.Errorf("la comunidad del olt es requerida")
 		}
 
-		s := snmp.NewSnmp(ip, community, retries, time.Duration(timeout)*time.Second)
+		s := snmp.NewSnmp(ip, community, retries, time.Duration(timeout)*time.Second, 1)
 		info, err := s.SysInfo()
+		s.Close()
 		if err != nil {
 			return fmt.Errorf("Error al intentar realizar una consulta snmp: %v", err)
 		}
 
-		dir, err := os.Executable()
+		store, cleanup, err := newStore(ctx)
 		if err != nil {
-			return fmt.Errorf("Error al intentar obtener la ruta del ejecutable")
+			return err
 		}
+		defer cleanup()
 
-		dbDir := filepath.Join(filepath.Dir(dir), "olt.db")
-		client, err := storage.NewOltDB(dbDir)
-		if err != nil {
-			return fmt.Errorf("Error al intentar acceder a la base de datos: %v", err)
-		}
-
-		defer client.Close()
-
-		err = client.InsertOLT(models.OLT{
+		err = store.InsertOLT(ctx, models.OLT{
 			IP:        ip,
 			Community: community,
 			Name:      info.SysName,
@@ -77,12 +76,11 @@ var OltAdd *cli.Command = &cli.Command{
 			Timeout:   timeout,
 			Retries:   retries,
 		})
-
 		if err != nil {
 			return fmt.Errorf("Error intentando ingresar el OLT: %v", err)
 		}
 
-		olt, err := client.GetOLTByID(ip)
+		olt, err := store.GetOLTByID(ctx, ip)
 		if err != nil {
 			return fmt.Errorf("OLT agregado con error, no se pudo recuperar los datos almacenados: %v", err)
 		}
@@ -95,22 +93,20 @@ var OltAdd *cli.Command = &cli.Command{
 var OltRemove *cli.Command = &cli.Command{
 	Name:  "remove",
 	Usage: "eliminar OLT",
-	Flags: []cli.Flag{&cli.IntFlag{Name: "ip", Usage: "IP del olt", Required: true}},
+	Flags: []cli.Flag{&cli.StringFlag{Name: "ip", Usage: "IP del olt", Required: true}},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		dir, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("Error al intentar obtener la ruta del ejecutable")
+		ip := c.String("ip")
+		if ip == "" {
+			return fmt.Errorf("la IP del olt es requerida")
 		}
 
-		dbDir := filepath.Join(filepath.Dir(dir), "olt.db")
-		client, err := storage.NewOltDB(dbDir)
+		store, cleanup, err := newStore(ctx)
 		if err != nil {
-			return fmt.Errorf("Error al intentar acceder a la base de datos: %v", err)
+			return err
 		}
+		defer cleanup()
 
-		defer client.Close()
-
-		if err := client.DeleteOLT(c.String("ip")); err != nil {
+		if err := store.DeleteOLT(ctx, ip); err != nil {
 			return fmt.Errorf("Error al intentar eliminar el olt: %v", err)
 		}
 

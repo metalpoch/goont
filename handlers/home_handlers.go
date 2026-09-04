@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 )
@@ -12,7 +11,7 @@ func HealthCheck(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"status":    "ok",
 		"timestamp": time.Now().Unix(),
-		"version":   "1.0.0",
+		"version":   "2.0.0",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -20,12 +19,26 @@ func HealthCheck(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// HomePage - Página de inicio
-func HomePage(w http.ResponseWriter, r *http.Request) {
+// Index - Lista de endpoints disponibles
+func Index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 
-	fmt.Fprintf(w, "Bienvenido a mi API REST")
+	response := map[string]any{
+		"service": "goont",
+		"version": "2.0.0",
+		"endpoints": []string{
+			"GET /api/v1/health",
+			"GET /api/v1/olt",
+			"GET /api/v1/olt/{ip}",
+			"GET /api/v1/traffic/{ip}",
+			"GET /api/v1/traffic/{ip}/{gpon}",
+			"GET /api/v1/traffic/{ip}/{gpon}/{ont}",
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }

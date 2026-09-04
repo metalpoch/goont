@@ -1,178 +1,38 @@
-# Agent Guidelines for GoONT
+# AGENTS.md
 
-Guidelines for AI agents working on the GoONT codebase. Covers build commands, testing, linting, and code style.
+Guidance for AI agents working on GoONT: a Go tool for managing/monitoring Huawei OLT/ONT devices via SNMP. Module name is `goont`, Go 1.25.6.
 
-## Build Commands
+## Commands
 
-### Building
 ```bash
-go build -o goont ./cmd/cli          # Build binary
-go install ./cmd/cli                 # Install to $GOPATH/bin
-GOOS=linux GOARCH=amd64 go build -o goont-linux-amd64 ./cmd/cli  # Cross‑compile
-go build -race -o goont ./cmd/cli    # With race detection
+go build -o goont ./cmd/cli           # CLI binary
+go build -o goont-server ./cmd/server # HTTP API server
+go test ./...                         # Standard tests (none exist yet)
+go vet ./... && gofmt -l .            # Only static checks available
+go mod tidy                           # Run before committing
 ```
 
-### Dependencies
-```bash
-go mod download     # Download dependencies
-go mod tidy         # Tidy module files (run before commits)
-go mod verify       # Verify dependencies
-```
+Requires a PostgreSQL with TimescaleDB running (default `localhost:5432`, user/password `postgres`, db `goont`). No tests, no CI, no linter config exist; verification means build + vet + gofmt. For integration testing, `docker run -d --name goont-dev-timescale -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=goont -p 5432:5432 timescale/timescaledb:latest-pg16` works.
 
-## Testing
+`make help` lists automation targets: `make check` (fmt+vet+build), `make build-cli`/`build-server`, `make image` (Docker multi-stage, alpine, both binaries, non-root), `make save` (exports `dist/goont-<tag>.tar.gz` for offline servers; transfer + `docker load` is manual, the Makefile has no ssh/scp). `IMAGE` is deliberately fully qualified as `docker.io/library/goont`: local docker is actually podman, which would otherwise brand the build as `localhost/goont`, while docker on the server resolves `goont:<tag>` to `docker.io/library/goont`. Runtime targets (`run-server`, `run-scan`, `run-cli CMD='...'`, `stop`/`restart`/`logs`) exec in docker and take config from `--env-file .env` (gitignored; `.env.example` documents the vars) — env is container config applied at `docker run`, never baked into the image; never hardcode credentials in the Makefile. Tag comes from `git describe --always --dirty`. Local docker is actually podman: image HEALTHCHECK is stripped from OCI-format builds, so run targets pass `--health-cmd` at `docker run` instead.
 
-### Running Tests
-```bash
-go test ./...                         # All tests
-go test -v ./...                      # Verbose output
-go test -race ./...                   # Race detection
-go test -cover ./...                  # Coverage
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
-go test -v ./commands -run TestOltAdd # Specific test
-go test -bench=. ./...                # Benchmarks
-```
+## Configuration (env vars, no flags/config files)
 
-### Test Structure
-- Test files: `*_test.go` in same package.
-- Use `testing` package.
-- No existing tests; follow standard Go patterns.
+- `DATABASE_URL` (default `postgres://postgres:postgres@localhost:5432/goont?sslmode=disable`) — the database itself is auto-created if missing (`storage.Connect` catches PG error `3D000` and runs `CREATE DATABASE` against the `postgres` DB).
+- `GOONT_ADDR` (default `0.0.0.0:8080`), `GOONT_SNMP_CONNS` (default 10, per-OLT pool size), `GOONT_MAX_OLTS` (default 32, parallel OLTs per scan).
+- Schema is migrated idempotently on every server start and every CLI action (`storage.Migrate`) — do not run migrations by hand.
 
-## Linting and Code Quality
+## Architecture
 
-### Formatting
-```bash
-go fmt ./...          # Format all Go files
-gofmt -d .            # Check formatting
-```
+- `cmd/cli` + `commands/` — CLI built on urfave/cli v3: `olt list|add|remove`, `ont scan`. Every action creates its own pgx pool via `commands.newStore` and closes it on exit.
+- `cmd/server` + `handlers/` + `middleware/` — HTTP API on `GOONT_ADDR`, stdlib `net/http` only. Go 1.22+ ServeMux patterns (`GET /api/v1/olt/{ip}`, `r.PathValue`), middleware chain Logging → RecoverPanic → CORS. Traffic endpoints take `initDate`/`endDate` query params in RFC3339 and return per-interval deltas/bps.
+- `snmp/` — gosnmp v2c client (port 161). `Snmp` holds a **pool of reused connections per OLT** (`NewSnmp(..., conns)`); `acquire/release` distributes queries over it — do NOT go back to connect-per-query. OID constants are private in `snmp/types.go`. Serial numbers are hex-encoded. `GponTraffic()` reads GPON **port** traffic from standard IF-MIB `ifHCInOctets`/`ifHCOutOctets` (not from summing ONTs).
+- `storage/` — PostgreSQL/TimescaleDB via `pgx/v5`. Hypertables `ont_measurements` (per-ONT, 3-day compression) and `gpon_measurements` (per-GPON-port, 7-day compression). Bulk writes use `pgx.CopyFrom`; ONT identity upserts use an `unnest(...)` array insert with `ON CONFLICT`. Deltas/bps are computed **in SQL** with `LAG` window functions (`storage/traffic.go`), not in Go. Counter resets (wrapped counters) are skipped, not extrapolated.
+- `models/` — shared struct types. `models.Ont` (raw sample) uses `*int32` for SNMP values that may be missing (nil → NULL in PG); response models (`OntMeasurement`, `GponMeasurement`, `OltMeasurement`) keep plain types where missing renders as 0.
 
-### Static Analysis
-```bash
-go vet ./...                          # Vet for suspicious constructs
-golangci-lint run ./...               # If golangci-lint installed
-```
+## Conventions
 
-### Suggested Linter Configuration
-If adding `.golangci.yml`, enable: `gofmt`, `govet`, `staticcheck`, `gosimple`, `unused`.
-
-## Code Style Guidelines
-
-### General Principles
-- Follow [Effective Go](https://go.dev/doc/effective_go).
-- Clear, maintainable code with meaningful names.
-- Small, single‑responsibility functions.
-- Prefer simplicity.
-
-### File Organization
-- One package per file.
-- Lowercase filenames, underscores only when needed.
-- `main` in `cmd/cli/main.go`.
-- Group related types/functions in same package.
-
-### Package Structure
-- `cmd/cli` – CLI entry point.
-- `commands` – CLI command implementations.
-- `snmp` – SNMP client logic.
-- `storage` – Database operations and types.
-
-### Import Ordering
-Group imports, separated by blank line:
-1. Standard library
-2. Internal packages (`goont/`)
-3. Third‑party packages
-
-Example:
-```go
-import (
-    "context"
-    "fmt"
-
-    "goont/snmp"
-
-    "github.com/urfave/cli/v3"
-)
-```
-
-### Naming Conventions
-- `camelCase` for locals and private functions.
-- `PascalCase` for exported identifiers.
-- Acronyms uppercase (`SNMP`, `OLT`, `ONT`).
-- Interface names end with `‑er` when appropriate (`Scanner`).
-- Database functions clear (`InsertOLT`, `GetOLTByID`).
-
-### Error Handling
-- Always handle errors; never ignore.
-- Wrap errors with `fmt.Errorf` and `%w`.
-- Error messages lower‑case, concise (Spanish or English, consistent).
-- Return `nil` on success.
-- Use `defer` for cleanup (close connections, files).
-
-Example:
-```go
-func doSomething() error {
-    client, err := storage.NewOltDB(path)
-    if err != nil { return fmt.Errorf("create client: %w", err) }
-    defer client.Close()
-    // ...
-}
-```
-
-### Logging
-- Use `log` package for errors/important events.
-- Avoid logging sensitive info (IPs, credentials).
-- CLI: user‑friendly messages via `fmt.Printf`, errors via `log.Fatal` or returning error.
-
-### Types and Structs
-- Define structs in appropriate package (`storage.OLT`, `snmp.Ont`).
-- Use `time.Time` for timestamps.
-- Use `int32`/`int64`/`uint64` as appropriate for SNMP values.
-- Document exported types with a comment.
-
-### Concurrency
-- Use `sync.WaitGroup` and channels for parallelism.
-- Limit concurrency with semaphore channel (see `commands/utils.go:ontScanner`).
-- Protect shared data with mutexes if needed.
-
-### SQL and Database
-- Parameterized queries (`?` placeholders).
-- Always check `rows.Err()` after iterating rows.
-- Wrap database errors with context (`%w`).
-- Use `sql.Null*` for nullable columns if needed.
-
-### CLI Commands
-- Commands are `*cli.Command` variables in `commands` package.
-- `Usage` text in Spanish (existing code).
-- Flags with clear names and defaults.
-- Action functions return error; CLI framework handles logging.
-
-## Project‑Specific Conventions
-
-### SNMP Constants
-- OID constants in `snmp/types.go` (private).
-- Hexadecimal encoding for serial numbers (`snmp/snmp.go:143`).
-
-### Language
-- User‑facing strings in Spanish (e.g., “Error al intentar…”).
-- Internal errors/logs can be English.
-- Keep consistency with existing code.
-
-### Database Files
-- Main OLT database: `olt.db` next to executable.
-- ONT measurement databases separate per OLT IP.
-- Do not commit database files to version control.
-
-## Commit Guidelines
-- Clear commit messages in imperative mood.
-- Short summary (≤50 chars), blank line, optional description.
-- Reference issues/PRs when applicable.
-- Run `go mod tidy` before committing.
-
-## Additional Notes
-- No Cursor/Copilot rules defined.
-- Go 1.25.6 (`go.mod`).
-- Dependencies managed via Go modules.
-- No CI/CD pipelines yet; consider adding GitHub Actions.
-
----
-
-*Last updated: 2026-03-13*
+- Code uses `WaitGroup.Go` (Go 1.25 method) for goroutines (`commands/utils.go`, `commands/ont.go`) — do not rewrite it as `wg.Add`/`Done`.
+- User-facing and CLI error strings are in Spanish ("Error al intentar..."); `storage/` and `handlers/` internal errors are in English, wrapped with `%w`. Match the style of the file you are editing.
+- Concurrency: `ontScanner` scans GPON ports with a semaphore sized to the SNMP pool (`snmp.DefaultConns`); `ont scan` processes up to `GOONT_MAX_OLTS` OLTs in parallel, one Snmp pool + one `now` timestamp per OLT scan cycle (ONT rows and GPON rows share the same timestamp, which the traffic queries rely on when joining counts).
+- JSON API: `GET /api/v1/traffic/{ip}` → OLT totals (sum of port counters), `/{ip}/{gpon}` → port counter traffic + ONT status counts, `/{ip}/{gpon}/{ont}` → per-ONT detail. Traffic comes from port-level IF-MIB counters; per-ONT counters are only for per-ONT endpoints.

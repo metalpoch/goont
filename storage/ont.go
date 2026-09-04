@@ -1,205 +1,110 @@
 package storage
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"goont/models"
-	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
-type OntClient struct {
-	db *sql.DB
-}
-
-func NewOntDB(path string) (*OntClient, error) {
-	dsn := path + "?" +
-		"_pragma=journal_mode(WAL)&" +
-		"_pragma=busy_timeout(5000)&" +
-		"_pragma=synchronous=NORMAL&" +
-		"_pragma=foreign_keys=ON"
-
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(time.Hour)
-
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("ping database: %w", err)
-	}
-
-	if err := createOntTables(db); err != nil {
-		return nil, fmt.Errorf("create tables: %w", err)
-	}
-
-	return &OntClient{db: db}, nil
-}
-
-func (o *OntClient) Close() {
-	if o.db != nil {
-		o.db.Close()
-	}
-}
-
-func (o *OntClient) BatchInsertOntMeasurements(measurements []models.Ont) error {
-	if len(measurements) == 0 {
+func (s *Store) UpsertOnts(ctx context.Context, oltIP string, onts []models.Ont) error {
+	if len(onts) == 0 {
 		return nil
 	}
 
-	tx, err := o.db.Begin()
+	gponIdx := make([]int32, len(onts))
+	ontIdx := make([]int32, len(onts))
+	serial := make([]string, len(onts))
+	description := make([]string, len(onts))
+	lineProfile := make([]string, len(onts))
+	gponInterface := make([]string, len(onts))
+
+	for i, o := range onts {
+		gponIdx[i] = int32(o.GponIdx)
+		ontIdx[i] = int32(o.OntIdx)
+		serial[i] = o.SerialNumber
+		description[i] = o.Despt
+		lineProfile[i] = o.LineProfName
+		gponInterface[i] = o.GponInterface
+	}
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO onts (olt_ip, gpon_idx, ont_idx, serial_number, description, line_profile, gpon_interface, last_seen)
+		SELECT $1, g, o, s, d, l, i, $2
+		FROM unnest($3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[]) AS t(g, o, s, d, l, i)
+		ON CONFLICT (olt_ip, gpon_idx, ont_idx) DO UPDATE SET
+			serial_number = EXCLUDED.serial_number,
+			description = EXCLUDED.description,
+			line_profile = EXCLUDED.line_profile,
+			gpon_interface = EXCLUDED.gpon_interface,
+			last_seen = EXCLUDED.last_seen
+	`, oltIP, onts[0].Time, gponIdx, ontIdx, serial, description, lineProfile, gponInterface)
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(`
-			INSERT INTO ont_measurements (
-				time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
-				line_profile, control_ranging, control_run_status, temperature,
-  			tx_power, rx_power, bytes_in, bytes_out
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`)
-	if err != nil {
-		return fmt.Errorf("prepare statement: %w", err)
-	}
-
-	defer stmt.Close()
-
-	for _, m := range measurements {
-		_, err := stmt.Exec(
-			m.Time, m.GponIdx, m.GponInterface, m.OntIdx, m.Despt, m.SerialNumber,
-			m.LineProfName, m.ControlRanging, m.ControlRunStatus, m.Temperature,
-			m.Tx, m.Rx, m.BytesIn, m.BytesOut,
-		)
-		if err != nil {
-			return fmt.Errorf("insert measurement: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
+		return fmt.Errorf("upsert onts: %w", err)
 	}
 
 	return nil
 }
 
-// GetMeasurementsByGponInRange returns measurements filtered by GPON index within a time range.
-func (o *OntClient) GetMeasurementsByGpon(gponIdx int, startTime, endTime time.Time) ([]models.Ont, error) {
-	rows, err := o.db.Query(`
-        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
-               line_profile, control_ranging, control_run_status, temperature,
-               tx_power, rx_power, bytes_in, bytes_out
-        FROM ont_measurements
-        WHERE time BETWEEN ? AND ? AND gpon_idx = ?
-        ORDER BY time ASC
-    `, startTime, endTime, gponIdx)
-	if err != nil {
-		return nil, fmt.Errorf("query measurements by gpon: %w", err)
-	}
-	defer rows.Close()
-
-	var results []models.Ont
-	for rows.Next() {
-		var m models.Ont
-		err := rows.Scan(
-			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
-			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
-			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scan measurement: %w", err)
-		}
-		results = append(results, m)
+func (s *Store) InsertOntMeasurements(ctx context.Context, oltIP string, onts []models.Ont) error {
+	if len(onts) == 0 {
+		return nil
 	}
 
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration: %w", err)
+	rows := make([][]any, 0, len(onts))
+	for _, o := range onts {
+		rows = append(rows, []any{
+			o.Time,
+			oltIP,
+			int32(o.GponIdx),
+			int32(o.OntIdx),
+			o.SerialNumber,
+			o.Despt,
+			o.LineProfName,
+			o.ControlRunStatus,
+			o.ControlRanging,
+			o.Temperature,
+			o.Tx,
+			o.Rx,
+			int64(o.BytesIn),
+			int64(o.BytesOut),
+		})
 	}
 
-	if results == nil {
-		return []models.Ont{}, nil
+	cols := []string{
+		"time", "olt_ip", "gpon_idx", "ont_idx", "serial_number", "description", "line_profile",
+		"run_status", "olt_distance", "temperature", "tx_power", "rx_power", "bytes_in", "bytes_out",
 	}
-	return results, nil
+
+	if _, err := s.pool.CopyFrom(ctx, pgx.Identifier{"ont_measurements"}, cols, pgx.CopyFromRows(rows)); err != nil {
+		return fmt.Errorf("copy ont measurements: %w", err)
+	}
+
+	return nil
 }
 
-// GetMeasurementsByOntInRange returns measurements filtered by GPON index and ONT index within a time range.
-func (o *OntClient) GetMeasurementsByOnt(gponIdx, ontIdx int, startTime, endTime time.Time) ([]models.Ont, error) {
-	rows, err := o.db.Query(`
-        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
-               line_profile, control_ranging, control_run_status, temperature,
-               tx_power, rx_power, bytes_in, bytes_out
-        FROM ont_measurements
-        WHERE time BETWEEN ? AND ? AND gpon_idx = ? AND ont_idx = ?
-        ORDER BY time ASC
-    `, startTime, endTime, gponIdx, ontIdx)
-	if err != nil {
-		return nil, fmt.Errorf("query measurements by ont: %w", err)
-	}
-	defer rows.Close()
-
-	var results []models.Ont
-	for rows.Next() {
-		var m models.Ont
-		err := rows.Scan(
-			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
-			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
-			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scan measurement: %w", err)
-		}
-		results = append(results, m)
+func (s *Store) InsertGponMeasurements(ctx context.Context, oltIP string, samples []models.GponSample) error {
+	if len(samples) == 0 {
+		return nil
 	}
 
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration: %w", err)
+	rows := make([][]any, 0, len(samples))
+	for _, m := range samples {
+		rows = append(rows, []any{
+			m.Time,
+			oltIP,
+			int32(m.GponIdx),
+			int64(m.BytesIn),
+			int64(m.BytesOut),
+		})
 	}
 
-	if results == nil {
-		return []models.Ont{}, nil
-	}
-	return results, nil
-}
+	cols := []string{"time", "olt_ip", "gpon_idx", "bytes_in", "bytes_out"}
 
-// GetAllMeasurements returns all measurements within a time range.
-func (o *OntClient) GetAllMeasurements(startTime, endTime time.Time) ([]models.Ont, error) {
-	rows, err := o.db.Query(`
-        SELECT time, gpon_idx, gpon_interface, ont_idx, despt, serial_number,
-               line_profile, control_ranging, control_run_status, temperature,
-               tx_power, rx_power, bytes_in, bytes_out
-        FROM ont_measurements
-        WHERE time BETWEEN ? AND ?
-        ORDER BY time ASC
-    `, startTime, endTime)
-	if err != nil {
-		return nil, fmt.Errorf("query all measurements: %w", err)
-	}
-	defer rows.Close()
-
-	var results []models.Ont
-	for rows.Next() {
-		var m models.Ont
-		err := rows.Scan(
-			&m.Time, &m.GponIdx, &m.GponInterface, &m.OntIdx, &m.Despt, &m.SerialNumber,
-			&m.LineProfName, &m.ControlRanging, &m.ControlRunStatus, &m.Temperature,
-			&m.Tx, &m.Rx, &m.BytesIn, &m.BytesOut,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scan measurement: %w", err)
-		}
-		results = append(results, m)
+	if _, err := s.pool.CopyFrom(ctx, pgx.Identifier{"gpon_measurements"}, cols, pgx.CopyFromRows(rows)); err != nil {
+		return fmt.Errorf("copy gpon measurements: %w", err)
 	}
 
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration: %w", err)
-	}
-
-	if results == nil {
-		return []models.Ont{}, nil
-	}
-	return results, nil
+	return nil
 }

@@ -2,26 +2,35 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
-	"goont/storage"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 )
 
-func getOntDB(ip string) (*storage.OntClient, error) {
-	dbPath := filepath.Join(dataDir, ip)
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("ONT database for IP %s not found", ip)
+// GetTrafficGpons - Trafico total del OLT (suma de todos sus puertos GPON)
+func GetTrafficGpons(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+	if ip == "" {
+		http.Error(w, "IP parameter required", http.StatusBadRequest)
+		return
 	}
-	client, err := storage.NewOntDB(dbPath)
+
+	dates, err := parseDate(r.URL.Query().Get("initDate"), r.URL.Query().Get("endDate"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to open ONT database for IP %s: %w", ip, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	return client, nil
+
+	measurements, err := store.OltTraffic(r.Context(), ip, dates.InitDate, dates.EndDate)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(measurements)
 }
 
+// GetTrafficONTS - Trafico de un puerto GPON (contadores del puerto) y estado de sus ONT
 func GetTrafficONTS(w http.ResponseWriter, r *http.Request) {
 	ip := r.PathValue("ip")
 	gponStr := r.PathValue("gpon")
@@ -36,34 +45,23 @@ func GetTrafficONTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	initDateStr := r.URL.Query().Get("initDate")
-	endDateStr := r.URL.Query().Get("endDate")
-
-	dates, err := parseDate(initDateStr, endDateStr)
+	dates, err := parseDate(r.URL.Query().Get("initDate"), r.URL.Query().Get("endDate"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	client, err := getOntDB(ip)
+	measurements, err := store.GponTrafficData(r.Context(), ip, gponIdx, dates.InitDate, dates.EndDate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer client.Close()
-
-	measurements, err := client.GetMeasurementsByGpon(gponIdx, dates.InitDate, dates.EndDate)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := proccessGroupedOnt(measurements)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(measurements)
 }
 
+// GetTrafficONT - Trafico de un ONT especifico
 func GetTrafficONT(w http.ResponseWriter, r *http.Request) {
 	ip := r.PathValue("ip")
 	gponStr := r.PathValue("gpon")
@@ -84,65 +82,18 @@ func GetTrafficONT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	initDateStr := r.URL.Query().Get("initDate")
-	endDateStr := r.URL.Query().Get("endDate")
-
-	dates, err := parseDate(initDateStr, endDateStr)
+	dates, err := parseDate(r.URL.Query().Get("initDate"), r.URL.Query().Get("endDate"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	client, err := getOntDB(ip)
+	measurements, err := store.OntTraffic(r.Context(), ip, gponIdx, ontIdx, dates.InitDate, dates.EndDate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer client.Close()
-
-	measurements, err := client.GetMeasurementsByOnt(gponIdx, ontIdx, dates.InitDate, dates.EndDate)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := proccessOnt(measurements)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
-}
-
-func GetTrafficGpons(w http.ResponseWriter, r *http.Request) {
-	ip := r.PathValue("ip")
-	if ip == "" {
-		http.Error(w, "IP parameter required", http.StatusBadRequest)
-		return
-	}
-
-	initDateStr := r.URL.Query().Get("initDate")
-	endDateStr := r.URL.Query().Get("endDate")
-
-	dates, err := parseDate(initDateStr, endDateStr)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	client, err := getOntDB(ip)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer client.Close()
-
-	measurements, err := client.GetAllMeasurements(dates.InitDate, dates.EndDate)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := processGponTraffic(measurements)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(measurements)
 }

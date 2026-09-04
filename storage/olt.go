@@ -1,50 +1,14 @@
 package storage
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"goont/models"
-	"time"
 
-	_ "modernc.org/sqlite"
+	"github.com/jackc/pgx/v5"
 )
 
-type OltClient struct {
-	db *sql.DB
-}
-
-func NewOltDB(path string) (*OltClient, error) {
-	dsn := path + "?" +
-		"_pragma=journal_mode(WAL)&" +
-		"_pragma=busy_timeout(5000)&" +
-		"_pragma=synchronous=NORMAL&" +
-		"_pragma=foreign_keys=ON"
-
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(time.Hour)
-
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("ping database: %w", err)
-	}
-
-	if err := createOltTables(db); err != nil {
-		return nil, fmt.Errorf("create tables: %w", err)
-	}
-
-	return &OltClient{db: db}, nil
-}
-
-func (o *OltClient) Close() {
-	o.db.Close()
-}
-
-func (o *OltClient) InsertOLT(olt models.OLT) error {
+func (s *Store) InsertOLT(ctx context.Context, olt models.OLT) error {
 	timeoutSec := olt.Timeout
 	if timeoutSec == 0 {
 		timeoutSec = 60
@@ -54,36 +18,32 @@ func (o *OltClient) InsertOLT(olt models.OLT) error {
 		retries = 3
 	}
 
-	result, err := o.db.Exec(`
+	_, err := s.pool.Exec(ctx, `
 		INSERT INTO olts (ip, community, name, location, snmp_timeout, snmp_retries)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT(ip) DO UPDATE SET
-			community = excluded.community,
-			name = excluded.name,
-			location = excluded.location,
-			snmp_timeout = excluded.snmp_timeout,
-			snmp_retries = excluded.snmp_retries,
-			updated_at = CURRENT_TIMESTAMP
+			community = EXCLUDED.community,
+			name = EXCLUDED.name,
+			location = EXCLUDED.location,
+			snmp_timeout = EXCLUDED.snmp_timeout,
+			snmp_retries = EXCLUDED.snmp_retries,
+			updated_at = now()
 	`, olt.IP, olt.Community, olt.Name, olt.Location, timeoutSec, retries)
 	if err != nil {
 		return fmt.Errorf("insert olt: %w", err)
 	}
 
-	_, err = result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("get last insert id: %w", err)
-	}
 	return nil
 }
 
-func (o *OltClient) GetOLTByID(ip string) (*models.InfoOLT, error) {
+func (s *Store) GetOLTByID(ctx context.Context, ip string) (*models.InfoOLT, error) {
 	var olt models.InfoOLT
-	err := o.db.QueryRow(`
+	err := s.pool.QueryRow(ctx, `
 		SELECT ip, community, name, location, created_at, updated_at
 		FROM olts
-		WHERE ip = ?
+		WHERE ip = $1
 	`, ip).Scan(&olt.IP, &olt.Community, &olt.Name, &olt.Location, &olt.CreatedAt, &olt.UpdatedAt)
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
 
@@ -94,8 +54,8 @@ func (o *OltClient) GetOLTByID(ip string) (*models.InfoOLT, error) {
 	return &olt, nil
 }
 
-func (o *OltClient) GetInfoOLTs() ([]models.InfoOLT, error) {
-	rows, err := o.db.Query(`
+func (s *Store) GetInfoOLTs(ctx context.Context) ([]models.InfoOLT, error) {
+	rows, err := s.pool.Query(ctx, `
 		SELECT ip, community, name, location, created_at, updated_at
 		FROM olts
 		ORDER BY ip
@@ -108,8 +68,7 @@ func (o *OltClient) GetInfoOLTs() ([]models.InfoOLT, error) {
 	var olts []models.InfoOLT
 	for rows.Next() {
 		var olt models.InfoOLT
-		err := rows.Scan(&olt.IP, &olt.Community, &olt.Name, &olt.Location, &olt.CreatedAt, &olt.UpdatedAt)
-		if err != nil {
+		if err := rows.Scan(&olt.IP, &olt.Community, &olt.Name, &olt.Location, &olt.CreatedAt, &olt.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan olt: %w", err)
 		}
 		olts = append(olts, olt)
@@ -123,17 +82,9 @@ func (o *OltClient) GetInfoOLTs() ([]models.InfoOLT, error) {
 	return olts, nil
 }
 
-func (o *OltClient) GetOLTs() ([]models.OLT, error) {
-	rows, err := o.db.Query(`
-		SELECT 
-		  ip,
-		  community,
-		  name,
-		  location,
-		  snmp_timeout,
-		  snmp_retries,
-		  created_at,
-		  updated_at
+func (s *Store) GetOLTs(ctx context.Context) ([]models.OLT, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT ip, community, name, location, snmp_timeout, snmp_retries, created_at, updated_at
 		FROM olts
 		ORDER BY ip
 	`)
@@ -141,11 +92,11 @@ func (o *OltClient) GetOLTs() ([]models.OLT, error) {
 		return nil, fmt.Errorf("query olts: %w", err)
 	}
 	defer rows.Close()
+
 	var olts []models.OLT
 	for rows.Next() {
 		var olt models.OLT
-		err := rows.Scan(&olt.IP, &olt.Community, &olt.Name, &olt.Location, &olt.Timeout, &olt.Retries, &olt.CreatedAt, &olt.UpdatedAt)
-		if err != nil {
+		if err := rows.Scan(&olt.IP, &olt.Community, &olt.Name, &olt.Location, &olt.Timeout, &olt.Retries, &olt.CreatedAt, &olt.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan olt: %w", err)
 		}
 		olts = append(olts, olt)
@@ -159,8 +110,8 @@ func (o *OltClient) GetOLTs() ([]models.OLT, error) {
 	return olts, nil
 }
 
-func (o *OltClient) DeleteOLT(ip string) error {
-	_, err := o.db.Exec("DELETE FROM olts WHERE ip = ?", ip)
+func (s *Store) DeleteOLT(ctx context.Context, ip string) error {
+	_, err := s.pool.Exec(ctx, "DELETE FROM olts WHERE ip = $1", ip)
 	if err != nil {
 		return fmt.Errorf("delete olt: %w", err)
 	}

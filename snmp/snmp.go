@@ -10,47 +10,117 @@ import (
 	"github.com/gosnmp/gosnmp"
 )
 
+const DefaultConns = 10
+
 type Snmp struct {
-	IP        string
-	Community string
-	Retries   int
-	Timeout   time.Duration
+	ip        string
+	community string
+	retries   int
+	timeout   time.Duration
+	pool      chan *gosnmp.GoSNMP
 }
 
-func NewSnmp(ip, community string, retries int, timeout time.Duration) *Snmp {
-	return &Snmp{ip, community, retries, timeout}
+func NewSnmp(ip, community string, retries int, timeout time.Duration, conns int) *Snmp {
+	if conns <= 0 {
+		conns = DefaultConns
+	}
+	return &Snmp{
+		ip:        ip,
+		community: community,
+		retries:   retries,
+		timeout:   timeout,
+		pool:      make(chan *gosnmp.GoSNMP, conns),
+	}
 }
 
-func (s *Snmp) connect() (*gosnmp.GoSNMP, error) {
+func (s *Snmp) IP() string {
+	return s.ip
+}
+
+func (s *Snmp) newConn() *gosnmp.GoSNMP {
 	client := &gosnmp.GoSNMP{
-		Target:             s.IP,
+		Target:             s.ip,
 		Port:               161,
-		Community:          s.Community,
+		Community:          s.community,
 		Version:            gosnmp.Version2c,
-		Timeout:            s.Timeout,
-		Retries:            s.Retries,
-		MaxOids:            2,
+		Timeout:            s.timeout,
+		Retries:            s.retries,
+		MaxOids:            10,
+		MaxRepetitions:     25,
 		ExponentialTimeout: true,
 	}
 
-	err := client.Connect()
-	if err != nil {
-		return nil, fmt.Errorf("conexión fallida: %v\n", err)
+	if err := client.Connect(); err != nil {
+		return nil
 	}
 
-	return client, nil
+	return client
+}
+
+func (s *Snmp) acquire() *gosnmp.GoSNMP {
+	select {
+	case c := <-s.pool:
+		if c != nil {
+			return c
+		}
+		return s.newConn()
+	default:
+		return s.newConn()
+	}
+}
+
+func (s *Snmp) release(c *gosnmp.GoSNMP) {
+	if c == nil {
+		return
+	}
+	select {
+	case s.pool <- c:
+	default:
+		c.Close()
+	}
+}
+
+func (s *Snmp) Close() {
+	for {
+		select {
+		case c := <-s.pool:
+			if c != nil {
+				c.Close()
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (s *Snmp) get(oids []string) (*gosnmp.SnmpPacket, error) {
+	c := s.acquire()
+	defer s.release(c)
+
+	result, err := c.Get(oids)
+	if err != nil {
+		return nil, fmt.Errorf("error en SNMP Get: %v", err)
+	}
+
+	return result, nil
+}
+
+func (s *Snmp) walk(oid string) ([]gosnmp.SnmpPDU, error) {
+	c := s.acquire()
+	defer s.release(c)
+
+	results, err := c.BulkWalkAll(oid)
+	if err != nil {
+		return nil, fmt.Errorf("error en SNMP BulkWalkAll on oid %s: %v", oid, err)
+	}
+
+	return results, nil
 }
 
 func (s *Snmp) SysInfo() (*OltInfo, error) {
-	client, err := s.connect()
+	result, err := s.get([]string{sysName, sysLocation})
 	if err != nil {
 		return nil, err
-	}
-	defer client.Close()
-
-	result, err := client.Get([]string{sysName, sysLocation})
-	if err != nil {
-		return nil, fmt.Errorf("error en SNMP Get: %v", err)
 	}
 
 	var info OltInfo
@@ -71,18 +141,12 @@ func (s *Snmp) SysInfo() (*OltInfo, error) {
 }
 
 func (s *Snmp) IfNames() ([]Gpon, error) {
-	client, err := s.connect()
+	results, err := s.walk(ifName)
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
 
 	var data []Gpon
-	results, err := client.BulkWalkAll(ifName)
-	if err != nil {
-		return nil, fmt.Errorf("error en SNMP BulkWalkAll on oid %s: %v", ifName, err)
-	}
-
 	for _, pdu := range results {
 		idx := extractOntIdx(pdu.Name)
 		if value, ok := pdu.Value.([]byte); ok {
@@ -91,21 +155,12 @@ func (s *Snmp) IfNames() ([]Gpon, error) {
 				data = append(data, Gpon{idx, str})
 			}
 		}
-
 	}
 
 	return data, nil
 }
 
 func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
-	client, err := s.connect()
-	if err != nil {
-		return nil, err
-	}
-	defer client.Close()
-
-	data := make(ontMeasurement)
-
 	oids := []string{
 		fmt.Sprintf("%s.%d", hwGponDeviceOntDespt, gpon.Idx),
 		fmt.Sprintf("%s.%d", hwGponDeviceOntSerialNumber, gpon.Idx),
@@ -119,10 +174,12 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 		fmt.Sprintf("%s.%d", hwGponOntOpticalDdmRxPower, gpon.Idx),
 	}
 
+	data := make(ontMeasurement)
+
 	for i, oid := range oids {
-		results, err := client.BulkWalkAll(oid)
+		results, err := s.walk(oid)
 		if err != nil {
-			return nil, fmt.Errorf("error en SNMP BulkWalkAll on oid %s: %v", oid, err)
+			return nil, err
 		}
 
 		for _, pdu := range results {
@@ -134,45 +191,50 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 			}
 
 			switch i {
-			case 0: // HwGponDeviceOntDespt
+			case 0:
 				if value, ok := pdu.Value.([]byte); ok {
 					dataOnt.Despt = string(value)
 				}
-			case 1: // HwGponDeviceOntSerialNumber
+			case 1:
 				if value, ok := pdu.Value.([]byte); ok {
 					dataOnt.SerialNumber = hex.EncodeToString(value)
 				}
-			case 2: // HwGponDeviceOntLineProfName
+			case 2:
 				if value, ok := pdu.Value.([]byte); ok {
 					dataOnt.LineProfName = string(value)
 				}
-			case 3: // HwGponDeviceOntControlRanging
+			case 3:
 				if value, ok := toInt64(pdu.Value); ok {
-					dataOnt.ControlRanging = int32(value)
+					v := int32(value)
+					dataOnt.ControlRanging = &v
 				}
-			case 4: // HwGponDeviceOntControlRunStatus
+			case 4:
 				if value, ok := toInt64(pdu.Value); ok {
-					dataOnt.ControlRunStatus = int32(value)
+					v := int32(value)
+					dataOnt.ControlRunStatus = &v
 				}
-			case 5: // HwGponOntStatisticUpBytes
+			case 5:
 				if value, ok := toUint64(pdu.Value); ok {
 					dataOnt.BytesOut = value
 				}
-			case 6: // HwGponOntStatisticDownBytes
+			case 6:
 				if value, ok := toUint64(pdu.Value); ok {
 					dataOnt.BytesIn = value
 				}
-			case 7: // hwGponOntOpticalDdmTemperature
+			case 7:
 				if value, ok := toInt64(pdu.Value); ok {
-					dataOnt.Temperature = int32(value)
+					v := int32(value)
+					dataOnt.Temperature = &v
 				}
-			case 8: // HwGponOntOpticalDdmTxPower
+			case 8:
 				if value, ok := toInt64(pdu.Value); ok {
-					dataOnt.Tx = int32(value)
+					v := int32(value)
+					dataOnt.Tx = &v
 				}
-			case 9: // HwGponOntOpticalDdmRxPower
+			case 9:
 				if value, ok := toInt64(pdu.Value); ok {
-					dataOnt.Rx = int32(value)
+					v := int32(value)
+					dataOnt.Rx = &v
 				}
 			}
 
@@ -181,6 +243,48 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 	}
 
 	return data, nil
+}
+
+func (s *Snmp) GponTraffic(gpons []Gpon) ([]GponTraffic, error) {
+	want := make(map[int]bool, len(gpons))
+	traffic := make(map[int]*GponTraffic, len(gpons))
+	for _, g := range gpons {
+		want[g.Idx] = true
+		traffic[g.Idx] = &GponTraffic{Idx: g.Idx}
+	}
+
+	inResults, err := s.walk(ifHCInOctets)
+	if err != nil {
+		return nil, err
+	}
+	for _, pdu := range inResults {
+		idx := extractOntIdx(pdu.Name)
+		if want[idx] {
+			if value, ok := toUint64(pdu.Value); ok {
+				traffic[idx].BytesIn = value
+			}
+		}
+	}
+
+	outResults, err := s.walk(ifHCOutOctets)
+	if err != nil {
+		return nil, err
+	}
+	for _, pdu := range outResults {
+		idx := extractOntIdx(pdu.Name)
+		if want[idx] {
+			if value, ok := toUint64(pdu.Value); ok {
+				traffic[idx].BytesOut = value
+			}
+		}
+	}
+
+	result := make([]GponTraffic, 0, len(gpons))
+	for _, g := range gpons {
+		result = append(result, *traffic[g.Idx])
+	}
+
+	return result, nil
 }
 
 func extractOntIdx(oid string) int {

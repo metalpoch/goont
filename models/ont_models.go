@@ -2,33 +2,28 @@ package models
 
 import "time"
 
-type GponMeasurement struct {
-	Time          time.Time `json:"time"`
-	GponInterface string    `json:"gpon_interface"`
-	TotalBytesIn  uint64    `json:"total_bytes_in"`
-	TotalBytesOut uint64    `json:"total_bytes_out"`
-	TotalBpsIn    float64   `json:"total_bps_in"`
-	TotalBpsOut   float64   `json:"total_bps_out"`
-	CountActive   int       `json:"count_active"`
-	CountInactive int       `json:"count_inactive"`
-	CountError    int       `json:"count_error"`
+type Ont struct {
+	Time             time.Time
+	GponIdx          int
+	GponInterface    string
+	OntIdx           int
+	Despt            string
+	SerialNumber     string
+	LineProfName     string
+	ControlRanging   *int32
+	ControlRunStatus *int32
+	Temperature      *int32
+	Tx               *int32
+	Rx               *int32
+	BytesIn          uint64
+	BytesOut         uint64
 }
 
-type Ont struct {
-	Time             time.Time `json:"time"`
-	GponIdx          int       `json:"gpon_idx"`
-	GponInterface    string    `json:"gpon_interface"`
-	OntIdx           int       `json:"ont_idx"`
-	Despt            string    `json:"desp"`
-	SerialNumber     string    `json:"serial_number"`
-	LineProfName     string    `json:"line_profile_name"`
-	ControlRanging   int32     `json:"olt_distance"`
-	ControlRunStatus int32     `json:"status"`
-	Temperature      int32     `json:"temperature"`
-	Tx               int32     `json:"tx_power"`
-	Rx               int32     `json:"rx_power"`
-	BytesIn          uint64    `json:"bytes_in"`
-	BytesOut         uint64    `json:"bytes_out"`
+type GponSample struct {
+	Time     time.Time
+	GponIdx  int
+	BytesIn  uint64
+	BytesOut uint64
 }
 
 type OntMeasurement struct {
@@ -47,7 +42,25 @@ type OntMeasurement struct {
 	Plan         string    `json:"plan"`
 }
 
-type OntGrouped map[uint8][]Ont             // OntIdx as key
-type OntResponse map[uint8][]OntMeasurement // OntIdx as key
+type GponMeasurement struct {
+	Time          time.Time `json:"time"`
+	GponInterface string    `json:"gpon_interface"`
+	BytesIn       uint64    `json:"bytes_in"`
+	BytesOut      uint64    `json:"bytes_out"`
+	BpsIn         float64   `json:"bps_in"`
+	BpsOut        float64   `json:"bps_out"`
+	CountActive   int       `json:"count_active"`
+	CountInactive int       `json:"count_inactive"`
+	CountError    int       `json:"count_error"`
+}
 
-type GponResponse map[int][]GponMeasurement // GponIdx as key
+type OltMeasurement struct {
+	Time          time.Time `json:"time"`
+	BytesIn       uint64    `json:"bytes_in"`
+	BytesOut      uint64    `json:"bytes_out"`
+	BpsIn         float64   `json:"bps_in"`
+	BpsOut        float64   `json:"bps_out"`
+	CountActive   int       `json:"count_active"`
+	CountInactive int       `json:"count_inactive"`
+	CountError    int       `json:"count_error"`
+}
