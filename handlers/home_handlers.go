@@ -33,6 +33,8 @@ func Index(w http.ResponseWriter, r *http.Request) {
 			"GET /api/v1/health",
 			"GET /api/v1/olt",
 			"GET /api/v1/olt/{ip}",
+			"GET /api/v1/olt/{ip}/ports",
+			"GET /api/v1/olt/{ip}/onts?q=<dni|serial>&gpon=<idx>",
 			"GET /api/v1/traffic/{ip}",
 			"GET /api/v1/traffic/{ip}/{gpon}",
 			"GET /api/v1/traffic/{ip}/{gpon}/{ont}",

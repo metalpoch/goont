@@ -138,6 +138,8 @@ Orden recomendado: agregar OLT → `ont scan` manual de prueba → configurar el
 | --- | --- |
 | `GET /api/v1/olt` | OLTs registrados |
 | `GET /api/v1/olt/{ip}` | Detalle de un OLT |
+| `GET /api/v1/olt/{ip}/ports` | Puertos GPON del OLT con conteo de ONTs |
+| `GET /api/v1/olt/{ip}/onts?q=&gpon=` | Inventario de ONTs, buscable por descripción (DNI/RIF) o serial |
 | `GET /api/v1/traffic/{ip}` | Tráfico total del OLT (suma de sus puertos) |
 | `GET /api/v1/traffic/{ip}/{gpon}` | Tráfico del puerto GPON + conteo de ONTs por estado |
 | `GET /api/v1/traffic/{ip}/{gpon}/{ont}` | Tráfico y señal óptica de un ONT |

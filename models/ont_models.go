@@ -64,3 +64,20 @@ type OltMeasurement struct {
 	CountInactive int       `json:"count_inactive"`
 	CountError    int       `json:"count_error"`
 }
+
+type OltPort struct {
+	GponIdx       int       `json:"gpon_idx"`
+	GponInterface string    `json:"gpon_interface"`
+	OntCount      int       `json:"ont_count"`
+	LastSeen      time.Time `json:"last_seen"`
+}
+
+type OntInfo struct {
+	GponIdx       int       `json:"gpon_idx"`
+	OntIdx        int       `json:"ont_idx"`
+	Desp          string    `json:"desp"`
+	SerialNumber  string    `json:"serial_number"`
+	LineProfName  string    `json:"line_profile"`
+	GponInterface string    `json:"gpon_interface"`
+	LastSeen      time.Time `json:"last_seen"`
+}
