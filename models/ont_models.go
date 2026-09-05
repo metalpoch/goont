@@ -4,7 +4,7 @@ import "time"
 
 type Ont struct {
 	Time             time.Time
-	GponIdx          int
+	GponIdx          uint64
 	GponInterface    string
 	OntIdx           int
 	Despt            string
@@ -21,7 +21,7 @@ type Ont struct {
 
 type GponSample struct {
 	Time     time.Time
-	GponIdx  int
+	GponIdx  uint64
 	BytesIn  uint64
 	BytesOut uint64
 }
@@ -66,14 +66,14 @@ type OltMeasurement struct {
 }
 
 type OltPort struct {
-	GponIdx       int       `json:"gpon_idx"`
+	GponIdx       uint64    `json:"gpon_idx"`
 	GponInterface string    `json:"gpon_interface"`
 	OntCount      int       `json:"ont_count"`
 	LastSeen      time.Time `json:"last_seen"`
 }
 
 type OntInfo struct {
-	GponIdx       int       `json:"gpon_idx"`
+	GponIdx       uint64    `json:"gpon_idx"`
 	OntIdx        int       `json:"ont_idx"`
 	Desp          string    `json:"desp"`
 	SerialNumber  string    `json:"serial_number"`

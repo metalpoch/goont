@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx, ontIdx int, from, to time.Time) ([]models.OntMeasurement, error) {
+func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, ontIdx int, from, to time.Time) ([]models.OntMeasurement, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH s AS (
 			SELECT time, bytes_in, bytes_out, run_status, olt_distance, temperature, tx_power, rx_power,
@@ -83,7 +83,7 @@ func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx, ontIdx in
 	return result, nil
 }
 
-func (s *Store) GponTrafficData(ctx context.Context, oltIP string, gponIdx int, from, to time.Time) ([]models.GponMeasurement, error) {
+func (s *Store) GponTrafficData(ctx context.Context, oltIP string, gponIdx uint64, from, to time.Time) ([]models.GponMeasurement, error) {
 	var ifName string
 	err := s.pool.QueryRow(ctx, `
 		SELECT gpon_interface FROM onts WHERE olt_ip = $1 AND gpon_idx = $2 LIMIT 1

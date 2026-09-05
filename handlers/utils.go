@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -39,4 +40,15 @@ func parseDate(initDateStr, endDateStr string) (rangeDate, error) {
 	}
 
 	return rangeDate{initTime, endTime}, nil
+}
+
+func parseGponIdx(s string) (uint64, error) {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if n < 0 {
+		return uint64(uint32(n)), nil
+	}
+	return uint64(n), nil
 }

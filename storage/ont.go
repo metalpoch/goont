@@ -13,7 +13,7 @@ func (s *Store) UpsertOnts(ctx context.Context, oltIP string, onts []models.Ont)
 		return nil
 	}
 
-	gponIdx := make([]int32, len(onts))
+	gponIdx := make([]int64, len(onts))
 	ontIdx := make([]int32, len(onts))
 	serial := make([]string, len(onts))
 	description := make([]string, len(onts))
@@ -21,7 +21,7 @@ func (s *Store) UpsertOnts(ctx context.Context, oltIP string, onts []models.Ont)
 	gponInterface := make([]string, len(onts))
 
 	for i, o := range onts {
-		gponIdx[i] = int32(o.GponIdx)
+		gponIdx[i] = int64(o.GponIdx)
 		ontIdx[i] = int32(o.OntIdx)
 		serial[i] = o.SerialNumber
 		description[i] = o.Despt
@@ -32,7 +32,7 @@ func (s *Store) UpsertOnts(ctx context.Context, oltIP string, onts []models.Ont)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO onts (olt_ip, gpon_idx, ont_idx, serial_number, description, line_profile, gpon_interface, last_seen)
 		SELECT $1, g, o, s, d, l, i, $2
-		FROM unnest($3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[]) AS t(g, o, s, d, l, i)
+		FROM unnest($3::bigint[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[]) AS t(g, o, s, d, l, i)
 		ON CONFLICT (olt_ip, gpon_idx, ont_idx) DO UPDATE SET
 			serial_number = EXCLUDED.serial_number,
 			description = EXCLUDED.description,
@@ -57,7 +57,7 @@ func (s *Store) InsertOntMeasurements(ctx context.Context, oltIP string, onts []
 		rows = append(rows, []any{
 			o.Time,
 			oltIP,
-			int32(o.GponIdx),
+			int64(o.GponIdx),
 			int32(o.OntIdx),
 			o.SerialNumber,
 			o.Despt,
@@ -94,7 +94,7 @@ func (s *Store) InsertGponMeasurements(ctx context.Context, oltIP string, sample
 		rows = append(rows, []any{
 			m.Time,
 			oltIP,
-			int32(m.GponIdx),
+			int64(m.GponIdx),
 			int64(m.BytesIn),
 			int64(m.BytesOut),
 		})

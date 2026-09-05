@@ -122,7 +122,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 		`CREATE TABLE IF NOT EXISTS onts (
 			olt_ip         text NOT NULL,
-			gpon_idx       int  NOT NULL,
+			gpon_idx       bigint NOT NULL,
 			ont_idx        int  NOT NULL,
 			serial_number  text NOT NULL DEFAULT '',
 			description    text NOT NULL DEFAULT '',
@@ -135,7 +135,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		`CREATE TABLE IF NOT EXISTS ont_measurements (
 			time          timestamptz NOT NULL,
 			olt_ip        text NOT NULL,
-			gpon_idx      int  NOT NULL,
+			gpon_idx      bigint NOT NULL,
 			ont_idx       int  NOT NULL,
 			serial_number text NOT NULL DEFAULT '',
 			description   text NOT NULL DEFAULT '',
@@ -164,7 +164,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		`CREATE TABLE IF NOT EXISTS gpon_measurements (
 			time      timestamptz NOT NULL,
 			olt_ip    text NOT NULL,
-			gpon_idx  int  NOT NULL,
+			gpon_idx  bigint NOT NULL,
 			bytes_in  bigint,
 			bytes_out bigint
 		)`,
@@ -184,6 +184,70 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, stmt := range statements {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+
+	if err := migrateGponIdxToBigint(ctx, pool); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func migrateGponIdxToBigint(ctx context.Context, pool *pgxpool.Pool) error {
+	tables := []struct {
+		name       string
+		hypertable bool
+		compress   string
+	}{
+		{"onts", false, ""},
+		{"ont_measurements", true, "3 days"},
+		{"gpon_measurements", true, "7 days"},
+	}
+
+	for _, t := range tables {
+		var dataType string
+		err := pool.QueryRow(ctx, `
+			SELECT data_type
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'gpon_idx'
+		`, t.name).Scan(&dataType)
+		if err != nil {
+			return fmt.Errorf("lookup %s.gpon_idx type: %w", t.name, err)
+		}
+
+		var hasNegative bool
+		if err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS(SELECT 1 FROM %s WHERE gpon_idx < 0)`, t.name)).Scan(&hasNegative); err != nil {
+			return fmt.Errorf("check negative %s.gpon_idx: %w", t.name, err)
+		}
+
+		if dataType == "bigint" && !hasNegative {
+			continue
+		}
+
+		if t.hypertable {
+			if _, err := pool.Exec(ctx, fmt.Sprintf(`SELECT remove_compression_policy('%s', if_exists => true)`, t.name)); err != nil {
+				return fmt.Errorf("remove compression policy %s: %w", t.name, err)
+			}
+			if _, err := pool.Exec(ctx, fmt.Sprintf(`SELECT decompress_chunk(c, true) FROM show_chunks('%s') c`, t.name)); err != nil {
+				return fmt.Errorf("decompress %s: %w", t.name, err)
+			}
+		}
+
+		if dataType != "bigint" {
+			if _, err := pool.Exec(ctx, fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN gpon_idx TYPE bigint`, t.name)); err != nil {
+				return fmt.Errorf("alter %s.gpon_idx to bigint: %w", t.name, err)
+			}
+		}
+
+		if _, err := pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET gpon_idx = gpon_idx + 4294967296 WHERE gpon_idx < 0`, t.name)); err != nil {
+			return fmt.Errorf("rewrite negative %s.gpon_idx: %w", t.name, err)
+		}
+
+		if t.hypertable {
+			if _, err := pool.Exec(ctx, fmt.Sprintf(`SELECT add_compression_policy('%s', INTERVAL '%s', if_not_exists => TRUE)`, t.name, t.compress)); err != nil {
+				return fmt.Errorf("restore compression policy %s: %w", t.name, err)
+			}
 		}
 	}
 

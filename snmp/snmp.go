@@ -148,7 +148,10 @@ func (s *Snmp) IfNames() ([]Gpon, error) {
 
 	var data []Gpon
 	for _, pdu := range results {
-		idx := extractOntIdx(pdu.Name)
+		idx, ok := extractOIDIndex(pdu.Name)
+		if !ok {
+			continue
+		}
 		if value, ok := pdu.Value.([]byte); ok {
 			str := string(value)
 			if strings.HasPrefix(str, "GPON") {
@@ -183,7 +186,11 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 		}
 
 		for _, pdu := range results {
-			idx := extractOntIdx(pdu.Name)
+			oidIdx, ok := extractOIDIndex(pdu.Name)
+			if !ok {
+				continue
+			}
+			idx := int(oidIdx)
 
 			dataOnt, exists := data[idx]
 			if !exists {
@@ -246,8 +253,8 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 }
 
 func (s *Snmp) GponTraffic(gpons []Gpon) ([]GponTraffic, error) {
-	want := make(map[int]bool, len(gpons))
-	traffic := make(map[int]*GponTraffic, len(gpons))
+	want := make(map[uint64]bool, len(gpons))
+	traffic := make(map[uint64]*GponTraffic, len(gpons))
 	for _, g := range gpons {
 		want[g.Idx] = true
 		traffic[g.Idx] = &GponTraffic{Idx: g.Idx}
@@ -258,11 +265,12 @@ func (s *Snmp) GponTraffic(gpons []Gpon) ([]GponTraffic, error) {
 		return nil, err
 	}
 	for _, pdu := range inResults {
-		idx := extractOntIdx(pdu.Name)
-		if want[idx] {
-			if value, ok := toUint64(pdu.Value); ok {
-				traffic[idx].BytesIn = value
-			}
+		idx, ok := extractOIDIndex(pdu.Name)
+		if !ok || !want[idx] {
+			continue
+		}
+		if value, ok := toUint64(pdu.Value); ok {
+			traffic[idx].BytesIn = value
 		}
 	}
 
@@ -271,11 +279,12 @@ func (s *Snmp) GponTraffic(gpons []Gpon) ([]GponTraffic, error) {
 		return nil, err
 	}
 	for _, pdu := range outResults {
-		idx := extractOntIdx(pdu.Name)
-		if want[idx] {
-			if value, ok := toUint64(pdu.Value); ok {
-				traffic[idx].BytesOut = value
-			}
+		idx, ok := extractOIDIndex(pdu.Name)
+		if !ok || !want[idx] {
+			continue
+		}
+		if value, ok := toUint64(pdu.Value); ok {
+			traffic[idx].BytesOut = value
 		}
 	}
 
@@ -287,13 +296,16 @@ func (s *Snmp) GponTraffic(gpons []Gpon) ([]GponTraffic, error) {
 	return result, nil
 }
 
-func extractOntIdx(oid string) int {
-	var i int = strings.LastIndex(oid, ".")
-	idx, err := strconv.Atoi(oid[i+1:])
-	if err != nil {
-		idx = -1
+func extractOIDIndex(oid string) (uint64, bool) {
+	i := strings.LastIndex(oid, ".")
+	if i < 0 || i+1 >= len(oid) {
+		return 0, false
 	}
-	return idx
+	idx, err := strconv.ParseUint(oid[i+1:], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return idx, true
 }
 
 func toUint64(value any) (uint64, bool) {

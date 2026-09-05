@@ -35,7 +35,7 @@ func (s *Store) ListOltPorts(ctx context.Context, oltIP string) ([]models.OltPor
 	return result, nil
 }
 
-func (s *Store) ListOnts(ctx context.Context, oltIP string, gponIdx *int, query string) ([]models.OntInfo, error) {
+func (s *Store) ListOnts(ctx context.Context, oltIP string, gponIdx *uint64, query string) ([]models.OntInfo, error) {
 	const limit = 500
 
 	conds := []string{"olt_ip = $1"}

@@ -39,7 +39,7 @@ func GetTrafficONTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gponIdx, err := strconv.Atoi(gponStr)
+	gponIdx, err := parseGponIdx(gponStr)
 	if err != nil {
 		http.Error(w, "GPON must be an integer", http.StatusBadRequest)
 		return
@@ -71,7 +71,7 @@ func GetTrafficONT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gponIdx, err := strconv.Atoi(gponStr)
+	gponIdx, err := parseGponIdx(gponStr)
 	if err != nil {
 		http.Error(w, "GPON must be an integer", http.StatusBadRequest)
 		return

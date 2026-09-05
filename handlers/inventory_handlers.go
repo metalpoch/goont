@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 )
 
 // GetOLTPorts - Enumerar los puertos GPON de un OLT con conteo de ONTs
@@ -54,9 +53,9 @@ func GetOLTONTs(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query().Get("q")
 
-	var gponIdx *int
+	var gponIdx *uint64
 	if g := r.URL.Query().Get("gpon"); g != "" {
-		idx, err := strconv.Atoi(g)
+		idx, err := parseGponIdx(g)
 		if err != nil {
 			http.Error(w, "GPON must be an integer", http.StatusBadRequest)
 			return

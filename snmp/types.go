@@ -42,12 +42,12 @@ type OltInfo struct {
 }
 
 type Gpon struct {
-	Idx    int
+	Idx    uint64
 	IfName string
 }
 
 type GponTraffic struct {
-	Idx      int
+	Idx      uint64
 	BytesIn  uint64
 	BytesOut uint64
 }
