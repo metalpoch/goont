@@ -253,44 +253,32 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 }
 
 func (s *Snmp) GponTraffic(gpons []Gpon) ([]GponTraffic, error) {
-	want := make(map[uint64]bool, len(gpons))
-	traffic := make(map[uint64]*GponTraffic, len(gpons))
-	for _, g := range gpons {
-		want[g.Idx] = true
-		traffic[g.Idx] = &GponTraffic{Idx: g.Idx}
-	}
-
-	inResults, err := s.walk(ifHCInOctets)
-	if err != nil {
-		return nil, err
-	}
-	for _, pdu := range inResults {
-		idx, ok := extractOIDIndex(pdu.Name)
-		if !ok || !want[idx] {
-			continue
-		}
-		if value, ok := toUint64(pdu.Value); ok {
-			traffic[idx].BytesIn = value
-		}
-	}
-
-	outResults, err := s.walk(ifHCOutOctets)
-	if err != nil {
-		return nil, err
-	}
-	for _, pdu := range outResults {
-		idx, ok := extractOIDIndex(pdu.Name)
-		if !ok || !want[idx] {
-			continue
-		}
-		if value, ok := toUint64(pdu.Value); ok {
-			traffic[idx].BytesOut = value
-		}
-	}
-
 	result := make([]GponTraffic, 0, len(gpons))
+
 	for _, g := range gpons {
-		result = append(result, *traffic[g.Idx])
+		t := GponTraffic{Idx: g.Idx}
+
+		inResults, err := s.walk(fmt.Sprintf("%s.%d", hwGponOltEthernetStatisticReceivedBytes, g.Idx))
+		if err != nil {
+			return nil, err
+		}
+		for _, pdu := range inResults {
+			if v, ok := toUint64(pdu.Value); ok {
+				t.BytesIn += v
+			}
+		}
+
+		outResults, err := s.walk(fmt.Sprintf("%s.%d", hwGponOltEthernetStatisticSendBytes, g.Idx))
+		if err != nil {
+			return nil, err
+		}
+		for _, pdu := range outResults {
+			if v, ok := toUint64(pdu.Value); ok {
+				t.BytesOut += v
+			}
+		}
+
+		result = append(result, t)
 	}
 
 	return result, nil

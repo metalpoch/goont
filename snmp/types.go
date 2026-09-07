@@ -6,9 +6,9 @@ const (
 	sysLocation string = ".1.3.6.1.2.1.1.6.0"
 	ifName      string = ".1.3.6.1.2.1.31.1.1.1.1"
 
-	// GPON port traffic (IF-MIB 64-bit counters)
-	ifHCInOctets  string = ".1.3.6.1.2.1.31.1.1.1.6"
-	ifHCOutOctets string = ".1.3.6.1.2.1.31.1.1.1.10"
+	// GPON OLT port traffic (Huawei proprietary)
+	hwGponOltEthernetStatisticReceivedBytes string = ".1.3.6.1.4.1.2011.6.128.1.1.4.21.1.15"
+	hwGponOltEthernetStatisticSendBytes     string = ".1.3.6.1.4.1.2011.6.128.1.1.4.21.1.30"
 
 	// ONT queries
 	hwGponDeviceOntDespt            string = ".1.3.6.1.4.1.2011.6.128.1.1.2.43.1.9"
