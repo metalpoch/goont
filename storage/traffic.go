@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const maxGPONBps = 2_500_000_000 // 2.5 Gbps GPON port speed limit
+
 func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, ontIdx int, from, to time.Time) ([]models.OntMeasurement, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH s AS (
@@ -34,9 +36,11 @@ func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, on
 			       serial_number, description, line_profile
 			FROM s
 			WHERE prev_time IS NOT NULL AND bytes_in >= prev_in AND bytes_out >= prev_out
+			  AND (bytes_in - prev_in) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $6
+			  AND (bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $6
 		) x
 		ORDER BY time
-	`, oltIP, gponIdx, ontIdx, from, to)
+	`, oltIP, gponIdx, ontIdx, from, to, maxGPONBps)
 	if err != nil {
 		return nil, fmt.Errorf("query ont traffic: %w", err)
 	}
@@ -109,6 +113,8 @@ func (s *Store) GponTrafficData(ctx context.Context, oltIP string, gponIdx uint6
 			       round((bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time)::numeric, 2)::float8 AS bps_out
 			FROM s
 			WHERE prev_time IS NOT NULL AND bytes_in >= prev_in AND bytes_out >= prev_out
+			  AND (bytes_in - prev_in) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $5
+			  AND (bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $5
 		)
 		SELECT t.time, t.din, t.dout, t.bps_in, t.bps_out,
 		       COALESCE(c.active, 0), COALESCE(c.inactive, 0), COALESCE(c.error, 0)
@@ -123,7 +129,7 @@ func (s *Store) GponTrafficData(ctx context.Context, oltIP string, gponIdx uint6
 			GROUP BY time
 		) c ON c.time = t.time
 		ORDER BY t.time
-	`, oltIP, gponIdx, from, to)
+	`, oltIP, gponIdx, from, to, maxGPONBps)
 	if err != nil {
 		return nil, fmt.Errorf("query gpon traffic: %w", err)
 	}
@@ -171,6 +177,8 @@ func (s *Store) OltTraffic(ctx context.Context, oltIP string, from, to time.Time
 			       round((bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time)::numeric, 2)::float8 AS bps_out
 			FROM s
 			WHERE prev_time IS NOT NULL AND bytes_in >= prev_in AND bytes_out >= prev_out
+			  AND (bytes_in - prev_in) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $4
+			  AND (bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $4
 		)
 		SELECT agg.time, agg.din, agg.dout, agg.bps_in, agg.bps_out,
 		       COALESCE(c.active, 0), COALESCE(c.inactive, 0), COALESCE(c.error, 0)
@@ -193,7 +201,7 @@ func (s *Store) OltTraffic(ctx context.Context, oltIP string, from, to time.Time
 			GROUP BY time
 		) c ON c.time = agg.time
 		ORDER BY agg.time
-	`, oltIP, from, to)
+	`, oltIP, from, to, maxGPONBps)
 	if err != nil {
 		return nil, fmt.Errorf("query olt traffic: %w", err)
 	}
