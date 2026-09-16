@@ -71,6 +71,54 @@ func TestIsSentinel(t *testing.T) {
 	}
 }
 
+func TestLineRateBps(t *testing.T) {
+	tests := []struct {
+		profile string
+		want    float64
+		ok      bool
+	}{
+		{"RES_HSI_Line_60M", 60e6, true},
+		{"FTTH_1G", 1e9, true},
+		{"plan_200Mbps", 200e6, true},
+		{"line_1.5G", 1.5e9, true},
+		{"line_512K", 512e3, true},
+		{"plan_1000M", 1e9, true},
+		{"plan_1000G", 1e9, true},
+		{"plan_2.5G", 2.5e9, true},
+		{"plan_10G", 1e10, true},
+		{"COMBO_Line_100M_4M", 100e6, true},
+		{"COMBO_Line_1G_4M", 1e9, true},
+		{"COMBO_Line_400M_12M", 400e6, true},
+		{"HG8145V5G", 0, false},
+		{"GPON0/1", 0, false},
+		{"RES_HSI_Line", 0, false},
+		{"", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.profile, func(t *testing.T) {
+			got, ok := LineRateBps(tt.profile)
+			if ok != tt.ok {
+				t.Fatalf("LineRateBps(%q) ok = %v, want %v", tt.profile, ok, tt.ok)
+			}
+			if ok && got != tt.want {
+				t.Fatalf("LineRateBps(%q) = %v, want %v", tt.profile, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOntMaxBps(t *testing.T) {
+	if got := OntMaxBps(0); got != MaxGponBps {
+		t.Fatalf("OntMaxBps(0) = %v, want %v", got, MaxGponBps)
+	}
+	if got := OntMaxBps(60e6); got != 90e6 {
+		t.Fatalf("OntMaxBps(60Mbps) = %v, want %v", got, 90e6)
+	}
+	if got := OntMaxBps(2e9); got != MaxGponBps {
+		t.Fatalf("OntMaxBps(2Gbps) = %v, want %v", got, MaxGponBps)
+	}
+}
+
 func TestValidOptical(t *testing.T) {
 	working := int32p(1)
 	los := int32p(2)

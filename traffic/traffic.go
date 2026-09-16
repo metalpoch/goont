@@ -8,10 +8,83 @@
 // servirse al consumidor.
 package traffic
 
-import "time"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // MaxGponBps es la capacidad física de un puerto GPON (2.5 Gbps).
 const MaxGponBps float64 = 2_500_000_000
+
+// BurstFactor es el margen sobre la tasa contratada que se tolera como ráfaga
+// legítima. Por encima de este múltiplo el intervalo se considera un artefacto
+// (contador reiniciado, ONT re-registrada, lectura corrupta).
+const BurstFactor float64 = 1.5
+
+// lineRateRe captura la tasa de un perfil de línea Huawei, p.ej.
+// "RES_HSI_Line_60M" -> 60 M, "FTTH_1G" -> 1 G. Exige que el número no esté
+// pegado a otro alfanumérico (evita falsos positivos como "V5G").
+var lineRateRe = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(\d+(?:[.,]\d+)?)\s*([kmg])(?:bps)?`)
+
+// LineRateBps extrae la velocidad contratada en bps del nombre de perfil de
+// línea. El nombre lo escribe una persona, así que el prefijo se normaliza:
+//
+//   - K: miles ("512K" -> 512 kbps).
+//   - M: el número ya está en Mbps ("60M" -> 60 Mbps, "1000M" -> 1 Gbps).
+//   - G: el número está en Mbps cuando es grande ("1000G" -> 1000 Mbps) y en
+//     Gbps cuando es pequeño ("1G" -> 1 Gbps, "2.5G" -> 2.5 Gbps).
+//
+// Devuelve ok=false si no hay una cifra reconocible. La tasa es solo un techo
+// heurístico: el llamador debe acotarla con OntMaxBps y, si no hay tasa, usar
+// la capacidad del puerto.
+//
+// En los productos combo ("COMBO_Line_100M_4M") el primer número es la tasa de
+// datos y el segundo la telefonía, por eso se toma el primero que aparezca.
+func LineRateBps(profile string) (float64, bool) {
+	m := lineRateRe.FindStringSubmatch(profile)
+	if m == nil {
+		return 0, false
+	}
+
+	value, err := strconv.ParseFloat(strings.Replace(m[1], ",", ".", 1), 64)
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+
+	var mbps float64
+	switch strings.ToLower(m[2]) {
+	case "k":
+		mbps = value / 1e3
+	case "m":
+		mbps = value
+	case "g":
+		if value >= 100 {
+			mbps = value
+		} else {
+			mbps = value * 1e3
+		}
+	default:
+		return 0, false
+	}
+
+	return mbps * 1e6, true
+}
+
+// OntMaxBps devuelve el máximo de bps plausible para una ONT de tasa rateBps:
+// la tasa contratada ampliada por BurstFactor, acotada a la capacidad del
+// puerto. Si la tasa no es positiva usa el límite del puerto.
+func OntMaxBps(rateBps float64) float64 {
+	if rateBps <= 0 {
+		return MaxGponBps
+	}
+	max := rateBps * BurstFactor
+	if max > MaxGponBps {
+		return MaxGponBps
+	}
+	return max
+}
 
 // SentinelInt32 es el valor centinela que Huawei usa para "sin medición".
 const SentinelInt32 int32 = 2147483647

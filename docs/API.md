@@ -25,6 +25,24 @@ sea plausible:
 - `bps_in`/`bps_out > 2.5e9` (equivale a `bytes > 2.5e9 / 8 * segundos`), típico
   de saltos por cortes de energía.
 
+En el endpoint por ONT (`/traffic/{ip}/{gpon}/{ont}`) rige además un tope por
+**tasa contratada**: se extrae la velocidad del `line_profile` (p. ej.
+`RES_HSI_Line_60M` → 60 Mbps) y se descarta todo intervalo que supere
+`tasa * 1.5` (margen de ráfaga), acotado a 2.5 Gbps. Esto elimina los picos
+irreales (300–600 Mbps en planes de 60 Mbps) provocados por reinicios o
+re-registros de la ONT.
+
+El `line_profile` es un nombre escrito a mano, así que el prefijo se normaliza:
+`K` = miles, `M` = el número está en Mbps (`1000M` = 1 Gbps) y `G` se interpreta
+como Gbps cuando el número es pequeño (`1G`, `2.5G`) o como Mbps cuando es
+grande (`1000G` = 1000 Mbps). En los combos (`COMBO_Line_100M_4M`) se toma el
+primer número, que es la tasa de **datos**; el segundo es telefonía y se ignora.
+Si el perfil no contiene una cifra reconocible
+(algunas ONT no la tienen), **no hay tope por plan** y se usa el límite del
+puerto (2.5 Gbps); el tope por tasa es una heurística de seguridad, no una
+fuente autoritativa. La tasa real solo se conoce en el OLT (perfil de línea),
+por lo que leerla de SNMP queda como mejora futura.
+
 Los intervalos inválidos **no se sirven** (se produce un *gap*): no se suman en
 ninguna agregación ni se extrapolan. La regla se aplica en tiempo de consulta,
 por lo que **también cubre datos históricos** almacenados antes de esta

@@ -11,7 +11,29 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// ontMaxBps calcula el máximo de bps plausible para una ONT a partir de su
+// perfil de línea más reciente. Si el perfil no declara una tasa reconocible,
+// se usa la capacidad del puerto GPON.
+func (s *Store) ontMaxBps(ctx context.Context, oltIP string, gponIdx uint64, ontIdx int, from, to time.Time) float64 {
+	var profile string
+	err := s.pool.QueryRow(ctx, `
+		SELECT line_profile FROM ont_measurements
+		WHERE olt_ip = $1 AND gpon_idx = $2 AND ont_idx = $3 AND time >= $4 AND time <= $5
+		ORDER BY time DESC LIMIT 1
+	`, oltIP, gponIdx, ontIdx, from, to).Scan(&profile)
+	if err != nil {
+		return traffic.MaxGponBps
+	}
+	rate, ok := traffic.LineRateBps(profile)
+	if !ok {
+		return traffic.MaxGponBps
+	}
+	return traffic.OntMaxBps(rate)
+}
+
 func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, ontIdx int, from, to time.Time) ([]models.OntMeasurement, error) {
+	limit := s.ontMaxBps(ctx, oltIP, gponIdx, ontIdx, from, to)
+
 	rows, err := s.pool.Query(ctx, `
 		WITH s AS (
 			SELECT time, bytes_in, bytes_out, run_status, olt_distance, temperature, tx_power, rx_power,
@@ -47,7 +69,7 @@ func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, on
 			  AND (bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $6
 		) x
 		ORDER BY time
-	`, oltIP, gponIdx, ontIdx, from, to, traffic.MaxGponBps, traffic.SentinelInt32, traffic.SentinelDistance)
+	`, oltIP, gponIdx, ontIdx, from, to, limit, traffic.SentinelInt32, traffic.SentinelDistance)
 	if err != nil {
 		return nil, fmt.Errorf("query ont traffic: %w", err)
 	}

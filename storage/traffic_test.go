@@ -277,6 +277,52 @@ func TestTraffic_CountUnmeasured(t *testing.T) {
 	}
 }
 
+// Criterio 4: un pico por encima del plan contratado (60 Mbps) se omite.
+func TestOntTraffic_PlanPeakOmitted(t *testing.T) {
+	s := testStore(t)
+	const ip = "10.10.0.7"
+	cleanOlt(t, s, ip)
+
+	t0, t1, t2, t3, _ := baseTimes()
+
+	_, err := s.pool.Exec(context.Background(),
+		`INSERT INTO ont_measurements
+		 (time, olt_ip, gpon_idx, ont_idx, line_profile, run_status, bytes_in, bytes_out)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		t0, ip, int64(1), 1, "RES_HSI_Line_60M", int32(1), int64(0), int64(0))
+	if err != nil {
+		t.Fatalf("insert ont profile: %v", err)
+	}
+	insertOntProfile := func(tm time.Time, in, out uint64) {
+		t.Helper()
+		_, err := s.pool.Exec(context.Background(),
+			`INSERT INTO ont_measurements
+			 (time, olt_ip, gpon_idx, ont_idx, line_profile, run_status, bytes_in, bytes_out)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			tm, ip, int64(1), 1, "RES_HSI_Line_60M", int32(1), int64(in), int64(out))
+		if err != nil {
+			t.Fatalf("insert ont profile: %v", err)
+		}
+	}
+
+	insertOntProfile(t1, 62_500_000, 62_500_000)   // ~50 Mbps: valido
+	insertOntProfile(t2, 788_500_000, 788_500_000) // pico falso ~581 Mbps
+	insertOntProfile(t3, 851_000_000, 851_000_000) // ~50 Mbps: valido
+
+	got, err := s.OntTraffic(context.Background(), ip, 1, 1, t0, t3)
+	if err != nil {
+		t.Fatalf("OntTraffic: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("se esperaban 2 intervalos validos, got %d: %+v", len(got), got)
+	}
+	for _, m := range got {
+		if m.Time.Equal(t2) {
+			t.Fatalf("el pico por encima del plan no debe servirse: %+v", m)
+		}
+	}
+}
+
 // count_unmeasured nunca es negativo aunque haya mas mediciones que inventario.
 func TestGponTraffic_UnmeasuredNeverNegative(t *testing.T) {
 	s := testStore(t)
