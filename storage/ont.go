@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"goont/models"
+	"goont/traffic"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -63,10 +64,10 @@ func (s *Store) InsertOntMeasurements(ctx context.Context, oltIP string, onts []
 			o.Despt,
 			o.LineProfName,
 			o.ControlRunStatus,
-			o.ControlRanging,
-			o.Temperature,
-			o.Tx,
-			o.Rx,
+			traffic.ValidOptical(o.ControlRunStatus, o.ControlRanging),
+			traffic.ValidOptical(o.ControlRunStatus, o.Temperature),
+			traffic.ValidOptical(o.ControlRunStatus, o.Tx),
+			traffic.ValidOptical(o.ControlRunStatus, o.Rx),
 			int64(o.BytesIn),
 			int64(o.BytesOut),
 		})

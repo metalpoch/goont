@@ -145,7 +145,7 @@ Orden recomendado: agregar OLT → `ont scan` manual de prueba → configurar el
 | `GET /api/v1/traffic/{ip}/{gpon}/{ont}` | Tráfico y señal óptica de un ONT |
 | `GET /api/v1/health` | Estado del servicio |
 
-Los endpoints de tráfico exigen `initDate` y `endDate` (formato RFC3339) y devuelven intervalos con bytes y bps calculados en la base de datos: se necesita al menos **dos escaneos** para que haya tráfico consultable.
+Los endpoints de tráfico exigen `initDate` y `endDate` (formato RFC3339) y devuelven intervalos con bytes y bps calculados en la base de datos: se necesita al menos **dos escaneos** para que haya tráfico consultable. Los intervalos con tráfico físicamente imposible (> 2.5 Gbps o wraps de contador) se omiten, el OLT solo suma intervalos válidos, los campos ópticos sin medición se sirven como `null` y las filas incluyen `count_unmeasured`. El contrato completo está en [`docs/API.md`](docs/API.md).
 
 ```bash
 curl 'https://<servidor>/api/v1/traffic/192.168.1.1?initDate=2026-09-04T00:00:00Z&endDate=2026-09-05T00:00:00Z'

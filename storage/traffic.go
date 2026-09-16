@@ -5,12 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"goont/models"
+	"goont/traffic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
-
-const maxGPONBps = 2_500_000_000 // 2.5 Gbps GPON port speed limit
 
 func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, ontIdx int, from, to time.Time) ([]models.OntMeasurement, error) {
 	rows, err := s.pool.Query(ctx, `
@@ -24,7 +23,15 @@ func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, on
 			WHERE olt_ip = $1 AND gpon_idx = $2 AND ont_idx = $3 AND time >= $4 AND time <= $5
 			WINDOW w AS (ORDER BY time)
 		)
-		SELECT time, din, dout, bps_in, bps_out, run_status, olt_distance, temperature, tx_power, rx_power,
+		SELECT time, din, dout, bps_in, bps_out, run_status,
+		       CASE WHEN run_status = 1 AND olt_distance IS NOT NULL
+		              AND olt_distance NOT IN ($7, $8) THEN olt_distance END AS olt_distance,
+		       CASE WHEN run_status = 1 AND temperature IS NOT NULL
+		              AND temperature NOT IN ($7) THEN temperature END AS temperature,
+		       CASE WHEN run_status = 1 AND tx_power IS NOT NULL
+		              AND tx_power NOT IN ($7) THEN tx_power END AS tx_power,
+		       CASE WHEN run_status = 1 AND rx_power IS NOT NULL
+		              AND rx_power NOT IN ($7) THEN rx_power END AS rx_power,
 		       serial_number, description, line_profile
 		FROM (
 			SELECT time,
@@ -40,7 +47,7 @@ func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, on
 			  AND (bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $6
 		) x
 		ORDER BY time
-	`, oltIP, gponIdx, ontIdx, from, to, maxGPONBps)
+	`, oltIP, gponIdx, ontIdx, from, to, traffic.MaxGponBps, traffic.SentinelInt32, traffic.SentinelDistance)
 	if err != nil {
 		return nil, fmt.Errorf("query ont traffic: %w", err)
 	}
@@ -65,17 +72,21 @@ func (s *Store) OntTraffic(ctx context.Context, oltIP string, gponIdx uint64, on
 		if runStatus != nil {
 			m.Status = int8(*runStatus)
 		}
-		if temperature != nil {
-			m.Temperature = int8(*temperature)
+		if v := traffic.ValidOptical(runStatus, temperature); v != nil {
+			t := int8(*v)
+			m.Temperature = &t
 		}
-		if oltDistance != nil {
-			m.OltDistance = int16(*oltDistance)
+		if v := traffic.ValidOptical(runStatus, oltDistance); v != nil {
+			d := int16(*v)
+			m.OltDistance = &d
 		}
-		if tx != nil {
-			m.Tx = float64(*tx) / 100
+		if v := traffic.ValidOptical(runStatus, tx); v != nil {
+			t := float64(*v) / 100
+			m.Tx = &t
 		}
-		if rx != nil {
-			m.Rx = float64(*rx) / 100
+		if v := traffic.ValidOptical(runStatus, rx); v != nil {
+			r := float64(*v) / 100
+			m.Rx = &r
 		}
 
 		result = append(result, m)
@@ -115,11 +126,9 @@ func (s *Store) GponTrafficData(ctx context.Context, oltIP string, gponIdx uint6
 			WHERE prev_time IS NOT NULL AND bytes_in >= prev_in AND bytes_out >= prev_out
 			  AND (bytes_in - prev_in) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $5
 			  AND (bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $5
-		)
-		SELECT t.time, t.din, t.dout, t.bps_in, t.bps_out,
-		       COALESCE(c.active, 0), COALESCE(c.inactive, 0), COALESCE(c.error, 0)
-		FROM t
-		LEFT JOIN (
+		), inv AS (
+			SELECT COUNT(*) AS total FROM onts WHERE olt_ip = $1 AND gpon_idx = $2
+		), c AS (
 			SELECT time,
 			       COUNT(*) FILTER (WHERE run_status = 1)  AS active,
 			       COUNT(*) FILTER (WHERE run_status = 2)  AS inactive,
@@ -127,9 +136,14 @@ func (s *Store) GponTrafficData(ctx context.Context, oltIP string, gponIdx uint6
 			FROM ont_measurements
 			WHERE olt_ip = $1 AND gpon_idx = $2 AND time >= $3 AND time <= $4
 			GROUP BY time
-		) c ON c.time = t.time
+		)
+		SELECT t.time, t.din, t.dout, t.bps_in, t.bps_out,
+		       COALESCE(c.active, 0), COALESCE(c.inactive, 0), COALESCE(c.error, 0),
+		       GREATEST((SELECT total FROM inv) - COALESCE(c.active, 0) - COALESCE(c.inactive, 0) - COALESCE(c.error, 0), 0)
+		FROM t
+		LEFT JOIN c ON c.time = t.time
 		ORDER BY t.time
-	`, oltIP, gponIdx, from, to, maxGPONBps)
+	`, oltIP, gponIdx, from, to, traffic.MaxGponBps)
 	if err != nil {
 		return nil, fmt.Errorf("query gpon traffic: %w", err)
 	}
@@ -142,7 +156,7 @@ func (s *Store) GponTrafficData(ctx context.Context, oltIP string, gponIdx uint6
 
 		if err := rows.Scan(
 			&m.Time, &din, &dout, &m.BpsIn, &m.BpsOut,
-			&m.CountActive, &m.CountInactive, &m.CountError,
+			&m.CountActive, &m.CountInactive, &m.CountError, &m.CountUnmeasured,
 		); err != nil {
 			return nil, fmt.Errorf("scan gpon traffic: %w", err)
 		}
@@ -179,9 +193,20 @@ func (s *Store) OltTraffic(ctx context.Context, oltIP string, from, to time.Time
 			WHERE prev_time IS NOT NULL AND bytes_in >= prev_in AND bytes_out >= prev_out
 			  AND (bytes_in - prev_in) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $4
 			  AND (bytes_out - prev_out) * 8 / EXTRACT(EPOCH FROM time - prev_time) <= $4
+		), inv AS (
+			SELECT COUNT(*) AS total FROM onts WHERE olt_ip = $1
+		), c AS (
+			SELECT time,
+			       COUNT(*) FILTER (WHERE run_status = 1)  AS active,
+			       COUNT(*) FILTER (WHERE run_status = 2)  AS inactive,
+			       COUNT(*) FILTER (WHERE run_status = -1) AS error
+			FROM ont_measurements
+			WHERE olt_ip = $1 AND time >= $2 AND time <= $3
+			GROUP BY time
 		)
 		SELECT agg.time, agg.din, agg.dout, agg.bps_in, agg.bps_out,
-		       COALESCE(c.active, 0), COALESCE(c.inactive, 0), COALESCE(c.error, 0)
+		       COALESCE(c.active, 0), COALESCE(c.inactive, 0), COALESCE(c.error, 0),
+		       GREATEST((SELECT total FROM inv) - COALESCE(c.active, 0) - COALESCE(c.inactive, 0) - COALESCE(c.error, 0), 0)
 		FROM (
 			SELECT time,
 			       SUM(din)::bigint AS din,
@@ -191,17 +216,9 @@ func (s *Store) OltTraffic(ctx context.Context, oltIP string, from, to time.Time
 			FROM t
 			GROUP BY time
 		) agg
-		LEFT JOIN (
-			SELECT time,
-			       COUNT(*) FILTER (WHERE run_status = 1)  AS active,
-			       COUNT(*) FILTER (WHERE run_status = 2)  AS inactive,
-			       COUNT(*) FILTER (WHERE run_status = -1) AS error
-			FROM ont_measurements
-			WHERE olt_ip = $1 AND time >= $2 AND time <= $3
-			GROUP BY time
-		) c ON c.time = agg.time
+		LEFT JOIN c ON c.time = agg.time
 		ORDER BY agg.time
-	`, oltIP, from, to, maxGPONBps)
+	`, oltIP, from, to, traffic.MaxGponBps)
 	if err != nil {
 		return nil, fmt.Errorf("query olt traffic: %w", err)
 	}
@@ -214,7 +231,7 @@ func (s *Store) OltTraffic(ctx context.Context, oltIP string, from, to time.Time
 
 		if err := rows.Scan(
 			&m.Time, &din, &dout, &m.BpsIn, &m.BpsOut,
-			&m.CountActive, &m.CountInactive, &m.CountError,
+			&m.CountActive, &m.CountInactive, &m.CountError, &m.CountUnmeasured,
 		); err != nil {
 			return nil, fmt.Errorf("scan olt traffic: %w", err)
 		}

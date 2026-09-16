@@ -29,10 +29,10 @@ type GponSample struct {
 type OntMeasurement struct {
 	Time         time.Time `json:"time"`
 	Status       int8      `json:"status"`
-	Temperature  int8      `json:"temperature"`
-	OltDistance  int16     `json:"olt_distance"`
-	Tx           float64   `json:"tx_power"`
-	Rx           float64   `json:"rx_power"`
+	Temperature  *int8     `json:"temperature"`
+	OltDistance  *int16    `json:"olt_distance"`
+	Tx           *float64  `json:"tx_power"`
+	Rx           *float64  `json:"rx_power"`
 	BpsIn        float64   `json:"bps_in"`
 	BpsOut       float64   `json:"bps_out"`
 	BytesIn      uint64    `json:"bytes_in"`
@@ -43,26 +43,28 @@ type OntMeasurement struct {
 }
 
 type GponMeasurement struct {
-	Time          time.Time `json:"time"`
-	GponInterface string    `json:"gpon_interface"`
-	BytesIn       uint64    `json:"bytes_in"`
-	BytesOut      uint64    `json:"bytes_out"`
-	BpsIn         float64   `json:"bps_in"`
-	BpsOut        float64   `json:"bps_out"`
-	CountActive   int       `json:"count_active"`
-	CountInactive int       `json:"count_inactive"`
-	CountError    int       `json:"count_error"`
+	Time            time.Time `json:"time"`
+	GponInterface   string    `json:"gpon_interface"`
+	BytesIn         uint64    `json:"bytes_in"`
+	BytesOut        uint64    `json:"bytes_out"`
+	BpsIn           float64   `json:"bps_in"`
+	BpsOut          float64   `json:"bps_out"`
+	CountActive     int       `json:"count_active"`
+	CountInactive   int       `json:"count_inactive"`
+	CountError      int       `json:"count_error"`
+	CountUnmeasured int       `json:"count_unmeasured"`
 }
 
 type OltMeasurement struct {
-	Time          time.Time `json:"time"`
-	BytesIn       uint64    `json:"bytes_in"`
-	BytesOut      uint64    `json:"bytes_out"`
-	BpsIn         float64   `json:"bps_in"`
-	BpsOut        float64   `json:"bps_out"`
-	CountActive   int       `json:"count_active"`
-	CountInactive int       `json:"count_inactive"`
-	CountError    int       `json:"count_error"`
+	Time            time.Time `json:"time"`
+	BytesIn         uint64    `json:"bytes_in"`
+	BytesOut        uint64    `json:"bytes_out"`
+	BpsIn           float64   `json:"bps_in"`
+	BpsOut          float64   `json:"bps_out"`
+	CountActive     int       `json:"count_active"`
+	CountInactive   int       `json:"count_inactive"`
+	CountError      int       `json:"count_error"`
+	CountUnmeasured int       `json:"count_unmeasured"`
 }
 
 type OltPort struct {
