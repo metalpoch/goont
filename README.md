@@ -97,7 +97,7 @@ Variables de entorno:
 | `GOONT_MAX_OLTS`   | `32`                                                          | OLTs escaneándose en paralelo                |
 | `GOONT_SCAN_TIMEOUT` | `15`                                                        | Timeout SNMP (segundos) por consulta durante `ont scan`; los valores por OLT solo se usan si son menores |
 | `GOONT_SCAN_RETRIES` | `2`                                                         | Reintentos SNMP por consulta durante `ont scan`; ídem |
-| `GOONT_SCAN_DEADLINE` | `270`                                                      | Deadline del ciclo de escaneo (segundos). Al vencer se conserva lo ya guardado y el lock se libera para el próximo cron |
+| `GOONT_SCAN_DEADLINE` | `270`                                                      | Deadline del ciclo de escaneo (segundos). Al vencer se conserva lo ya guardado y el lock se libera para el próximo cron. Con el cron de 15 min usar `780` (13 min) |
 | `GOONT_DB_MAX_CONNS` | `10`                                                        | Conexiones del pool del servidor API (la CLI usa 3) |
 | `GOONT_CACHE_TTL`  | `60`                                                          | Segundos que se cachean las respuestas JSON (`0` desactiva) |
 | `GOONT_CACHE_MB`   | `64`                                                          | Memoria máxima de la caché en MiB                  |
@@ -133,15 +133,16 @@ make run-cli CMD='olt list'
 Para escanear periódicamente, entrada de cron en el servidor:
 
 ```
-*/5 * * * * cd /opt/goont && make run-scan >> /var/log/goont-scan.log 2>&1
+*/15 * * * * cd /opt/goont && make run-scan >> /var/log/goont-scan.log 2>&1
 ```
 
-El cron intenta cada 5 minutos, pero `ont scan` toma un bloqueo en Postgres
+El cron intenta cada 15 minutos, pero `ont scan` toma un bloqueo en Postgres
 (`TryScanLock`): si el ciclo anterior sigue corriendo, el nuevo se omite. El
 escaneo guarda por puerto apenas termina, con un deadline de
-`GOONT_SCAN_DEADLINE` (270 s por defecto): los OLTs/puertos que no responden a
-tiempo quedan como hueco y el ciclo siguiente los reintenta. La cadencia real
-de cada OLT es la del ciclo que alcanzó a escanearlo, no los 5 minutos del cron.
+`GOONT_SCAN_DEADLINE` (780 s en el ejemplo de 15 min; 270 s es el default del
+código): los OLTs/puertos que no responden a tiempo quedan como hueco y el ciclo
+siguiente los reintenta. La cadencia real de cada OLT es la del ciclo que
+alcanzó a escanearlo, no los 15 minutos del cron.
 
 ### Operación en el servidor (docker exec)
 

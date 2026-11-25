@@ -289,7 +289,8 @@ El consumidor debe tratar los campos ópticos como opcionales y dibujar un hueco
 cuando sean `null`.
 
 El escaneo guarda por puerto apenas termina: si un OLT o un puerto no responde
-dentro del ciclo (`GOONT_SCAN_DEADLINE`, 270 s por defecto), ese intervalo no
-aparece y queda como hueco. `count_unmeasured` refleja los ONTs del inventario
+dentro del ciclo (`GOONT_SCAN_DEADLINE`, 780 s en el esquema de 15 min; 270 s
+es el default del código), ese intervalo no aparece y queda como hueco.
+`count_unmeasured` refleja los ONTs del inventario
 que no se midieron en ese ciclo; un ONT que respondió parcialmente puede traer
 `null` en los contadores u óptica que fallaron.
