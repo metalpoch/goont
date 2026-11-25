@@ -34,6 +34,8 @@ type ont struct {
 	Rx               *int32
 	BytesIn          uint64
 	BytesOut         uint64
+	BytesInValid     bool
+	BytesOutValid    bool
 }
 
 type OltInfo struct {

@@ -6,7 +6,7 @@ GoONT es una herramienta de línea de comandos (CLI) escrita en Go para la gesti
 
 - **Gestión de OLTs**: Agregar, listar y eliminar OLTs de la base de datos
 - **Escaneo de ONTs**: Obtención automática de información de ONTs conectados a cada OLT
-- **Tráfico de puertos GPON**: Contadores oficiales del puerto vía IF-MIB (`ifHCInOctets`/`ifHCOutOctets`), sin sumar ONTs
+- **Tráfico de puertos GPON**: Contadores del puerto vía MIB PON de Huawei (`hwGponOltEthernetStatisticReceivedBytes`/`SendBytes`), sin sumar ONTs
 - **Almacenamiento**: PostgreSQL con TimescaleDB (hypertables + compresión automática)
 - **Consultas SNMP**: Soporte para SNMP v2c con pool de conexiones reutilizables por OLT
 - **Concurrente**: Escaneo paralelo de múltiples OLTs y puertos GPON
@@ -60,7 +60,7 @@ goont/
 ├── handlers/            # Handlers HTTP de la API
 ├── middleware/          # Logging, RecoverPanic, CORS
 ├── models/              # Tipos compartidos
-├── snmp/                # Cliente SNMP (pool de conexiones, OIDs Huawei GPON + IF-MIB)
+├── snmp/                # Cliente SNMP (pool de conexiones, OIDs Huawei GPON)
 └── storage/             # PostgreSQL/TimescaleDB (migraciones, escritura masiva, consultas)
 ```
 
@@ -71,7 +71,7 @@ PostgreSQL + TimescaleDB. Las tablas se crean automáticamente al primer arranqu
 - `olts`: registro de OLTs (IP, community, timeouts)
 - `onts`: identidad de cada ONT visto (IP, puerto GPON, índice, serial)
 - `ont_measurements`: hypertable con mediciones por ONT (contadores, señal, estado)
-- `gpon_measurements`: hypertable con contadores de tráfico por puerto GPON (IF-MIB) y los conteos active/inactive/error del mismo escaneo
+- `gpon_measurements`: hypertable con contadores de tráfico por puerto GPON (MIB PON Huawei) y los conteos active/inactive/error del mismo escaneo
 
 Compresión automática activada (3 días para ONT, 7 para GPON). El bps se calcula en SQL con `LAG` sobre los contadores, por lo que las consultas por rango de fechas son rápidas incluso con millones de filas.
 
@@ -95,6 +95,9 @@ Variables de entorno:
 | `GOONT_ADDR`       | `0.0.0.0:8080`                                                | Dirección de escucha del servidor HTTP       |
 | `GOONT_SNMP_CONNS` | `10`                                                          | Conexiones SNMP simultáneas por OLT          |
 | `GOONT_MAX_OLTS`   | `32`                                                          | OLTs escaneándose en paralelo                |
+| `GOONT_SCAN_TIMEOUT` | `15`                                                        | Timeout SNMP (segundos) por consulta durante `ont scan`; los valores por OLT solo se usan si son menores |
+| `GOONT_SCAN_RETRIES` | `2`                                                         | Reintentos SNMP por consulta durante `ont scan`; ídem |
+| `GOONT_SCAN_DEADLINE` | `270`                                                      | Deadline del ciclo de escaneo (segundos). Al vencer se conserva lo ya guardado y el lock se libera para el próximo cron |
 | `GOONT_DB_MAX_CONNS` | `10`                                                        | Conexiones del pool del servidor API (la CLI usa 3) |
 | `GOONT_CACHE_TTL`  | `60`                                                          | Segundos que se cachean las respuestas JSON (`0` desactiva) |
 | `GOONT_CACHE_MB`   | `64`                                                          | Memoria máxima de la caché en MiB                  |
@@ -130,8 +133,15 @@ make run-cli CMD='olt list'
 Para escanear periódicamente, entrada de cron en el servidor:
 
 ```
-0 */5 * * * cd /opt/goont && make run-scan >> /var/log/goont-scan.log 2>&1
+*/5 * * * * cd /opt/goont && make run-scan >> /var/log/goont-scan.log 2>&1
 ```
+
+El cron intenta cada 5 minutos, pero `ont scan` toma un bloqueo en Postgres
+(`TryScanLock`): si el ciclo anterior sigue corriendo, el nuevo se omite. El
+escaneo guarda por puerto apenas termina, con un deadline de
+`GOONT_SCAN_DEADLINE` (270 s por defecto): los OLTs/puertos que no responden a
+tiempo quedan como hueco y el ciclo siguiente los reintenta. La cadencia real
+de cada OLT es la del ciclo que alcanzó a escanearlo, no los 5 minutos del cron.
 
 ### Operación en el servidor (docker exec)
 

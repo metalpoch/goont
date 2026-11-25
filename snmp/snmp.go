@@ -1,6 +1,7 @@
 package snmp
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -39,15 +40,18 @@ func (s *Snmp) IP() string {
 
 func (s *Snmp) newConn() *gosnmp.GoSNMP {
 	client := &gosnmp.GoSNMP{
-		Target:             s.ip,
-		Port:               161,
-		Community:          s.community,
-		Version:            gosnmp.Version2c,
-		Timeout:            s.timeout,
-		Retries:            s.retries,
-		MaxOids:            10,
-		MaxRepetitions:     25,
-		ExponentialTimeout: true,
+		Target:         s.ip,
+		Port:           161,
+		Community:      s.community,
+		Version:        gosnmp.Version2c,
+		Timeout:        s.timeout,
+		Retries:        s.retries,
+		MaxOids:        10,
+		MaxRepetitions: 25,
+		// Sin backoff exponencial: con 15 s y 2 reintentos una consulta muerta
+		// cuesta ~45 s, no 15+30+60. El escaneo tiene un deadline fijo y no
+		// puede permitirse esperas crecientes por cada OID.
+		ExponentialTimeout: false,
 	}
 
 	if err := client.Connect(); err != nil {
@@ -163,7 +167,7 @@ func (s *Snmp) IfNames() ([]Gpon, error) {
 	return data, nil
 }
 
-func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
+func (s *Snmp) OntQuery(ctx context.Context, gpon Gpon) (ontMeasurement, error) {
 	oids := []string{
 		fmt.Sprintf("%s.%d", hwGponDeviceOntDespt, gpon.Idx),
 		fmt.Sprintf("%s.%d", hwGponDeviceOntSerialNumber, gpon.Idx),
@@ -178,11 +182,25 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 	}
 
 	data := make(ontMeasurement)
+	var firstErr error
 
 	for i, oid := range oids {
+		if err := ctx.Err(); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			break
+		}
+
 		results, err := s.walk(oid)
 		if err != nil {
-			return nil, err
+			// Un OID que falla (típicamente un timeout) no debe tirar los datos
+			// de los otros: se guarda lo leído, se deja NULL lo que faltó y se
+			// sigue con el resto mientras el deadline del ciclo lo permita.
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 
 		for _, pdu := range results {
@@ -223,10 +241,12 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 			case 5:
 				if value, ok := toUint64(pdu.Value); ok {
 					dataOnt.BytesOut = value
+					dataOnt.BytesOutValid = true
 				}
 			case 6:
 				if value, ok := toUint64(pdu.Value); ok {
 					dataOnt.BytesIn = value
+					dataOnt.BytesInValid = true
 				}
 			case 7:
 				if value, ok := toInt64(pdu.Value); ok {
@@ -249,39 +269,42 @@ func (s *Snmp) OntQuery(gpon Gpon) (ontMeasurement, error) {
 		}
 	}
 
-	return data, nil
+	return data, firstErr
 }
 
-func (s *Snmp) GponTraffic(gpons []Gpon) ([]GponTraffic, error) {
-	result := make([]GponTraffic, 0, len(gpons))
+// GponTrafficPort lee los contadores de un único puerto GPON. El escaneo lo
+// llama puerto a puerto para que el fallo de uno no descarte el tráfico de los
+// demás (antes GponTraffic abortaba todo el OLT al primer error).
+func (s *Snmp) GponTrafficPort(ctx context.Context, g Gpon) (GponTraffic, error) {
+	t := GponTraffic{Idx: g.Idx}
 
-	for _, g := range gpons {
-		t := GponTraffic{Idx: g.Idx}
-
-		inResults, err := s.walk(fmt.Sprintf("%s.%d", hwGponOltEthernetStatisticReceivedBytes, g.Idx))
-		if err != nil {
-			return nil, err
+	if err := ctx.Err(); err != nil {
+		return t, err
+	}
+	inResults, err := s.walk(fmt.Sprintf("%s.%d", hwGponOltEthernetStatisticReceivedBytes, g.Idx))
+	if err != nil {
+		return t, err
+	}
+	for _, pdu := range inResults {
+		if v, ok := toUint64(pdu.Value); ok {
+			t.BytesIn += v
 		}
-		for _, pdu := range inResults {
-			if v, ok := toUint64(pdu.Value); ok {
-				t.BytesIn += v
-			}
-		}
-
-		outResults, err := s.walk(fmt.Sprintf("%s.%d", hwGponOltEthernetStatisticSendBytes, g.Idx))
-		if err != nil {
-			return nil, err
-		}
-		for _, pdu := range outResults {
-			if v, ok := toUint64(pdu.Value); ok {
-				t.BytesOut += v
-			}
-		}
-
-		result = append(result, t)
 	}
 
-	return result, nil
+	if err := ctx.Err(); err != nil {
+		return t, err
+	}
+	outResults, err := s.walk(fmt.Sprintf("%s.%d", hwGponOltEthernetStatisticSendBytes, g.Idx))
+	if err != nil {
+		return t, err
+	}
+	for _, pdu := range outResults {
+		if v, ok := toUint64(pdu.Value); ok {
+			t.BytesOut += v
+		}
+	}
+
+	return t, nil
 }
 
 func extractOIDIndex(oid string) (uint64, bool) {

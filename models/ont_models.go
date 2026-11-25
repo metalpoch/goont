@@ -17,6 +17,11 @@ type Ont struct {
 	Rx               *int32
 	BytesIn          uint64
 	BytesOut         uint64
+	// BytesInValid/BytesOutValid distinguen un contador realmente leído de uno
+	// que no se pudo consultar (walk con timeout). Los inválidos se guardan
+	// como NULL para que el cálculo de bps los trate como hueco, no como 0.
+	BytesInValid  bool
+	BytesOutValid bool
 }
 
 type GponSample struct {

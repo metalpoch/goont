@@ -30,6 +30,8 @@ go.work.sum
 # build artifacts
 dist/
 bin/
+# caché local de Go cuando el GOCACHE/GOMODCACHE global es de solo lectura
+.gocache/
 
 # Editor/IDE
 # .idea/

@@ -199,7 +199,7 @@ Solo aparecen los puertos con al menos un intervalo válido en el rango. El
 
 ### `GET /api/v1/traffic/{ip}/{gpon}`
 
-Tráfico del puerto GPON (contadores IF-MIB del puerto) y conteo de sus ONTs.
+Tráfico del puerto GPON (contadores del puerto vía MIB PON Huawei) y conteo de sus ONTs.
 `{gpon}` acepta el índice entero (admite valores sin signo de 32 bits).
 
 ```json
@@ -287,3 +287,9 @@ centinelas truncados). Se mantiene la misma versión `/api/v1`:
 
 El consumidor debe tratar los campos ópticos como opcionales y dibujar un hueco
 cuando sean `null`.
+
+El escaneo guarda por puerto apenas termina: si un OLT o un puerto no responde
+dentro del ciclo (`GOONT_SCAN_DEADLINE`, 270 s por defecto), ese intervalo no
+aparece y queda como hueco. `count_unmeasured` refleja los ONTs del inventario
+que no se midieron en ese ciclo; un ONT que respondió parcialmente puede traer
+`null` en los contadores u óptica que fallaron.

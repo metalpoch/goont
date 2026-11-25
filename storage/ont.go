@@ -35,10 +35,10 @@ func (s *Store) UpsertOnts(ctx context.Context, oltIP string, onts []models.Ont)
 		SELECT $1, g, o, s, d, l, i, $2
 		FROM unnest($3::bigint[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[]) AS t(g, o, s, d, l, i)
 		ON CONFLICT (olt_ip, gpon_idx, ont_idx) DO UPDATE SET
-			serial_number = EXCLUDED.serial_number,
-			description = EXCLUDED.description,
-			line_profile = EXCLUDED.line_profile,
-			gpon_interface = EXCLUDED.gpon_interface,
+			serial_number = COALESCE(NULLIF(EXCLUDED.serial_number, ''), onts.serial_number),
+			description = COALESCE(NULLIF(EXCLUDED.description, ''), onts.description),
+			line_profile = COALESCE(NULLIF(EXCLUDED.line_profile, ''), onts.line_profile),
+			gpon_interface = COALESCE(NULLIF(EXCLUDED.gpon_interface, ''), onts.gpon_interface),
 			last_seen = EXCLUDED.last_seen
 	`, oltIP, onts[0].Time, gponIdx, ontIdx, serial, description, lineProfile, gponInterface)
 	if err != nil {
@@ -55,6 +55,16 @@ func (s *Store) InsertOntMeasurements(ctx context.Context, oltIP string, onts []
 
 	rows := make([][]any, 0, len(onts))
 	for _, o := range onts {
+		// Un contador no leído se guarda NULL, no 0: así el LAG lo trata como
+		// hueco y no inventa un delta contra la muestra anterior.
+		var bytesIn, bytesOut any
+		if o.BytesInValid {
+			bytesIn = int64(o.BytesIn)
+		}
+		if o.BytesOutValid {
+			bytesOut = int64(o.BytesOut)
+		}
+
 		rows = append(rows, []any{
 			o.Time,
 			oltIP,
@@ -68,8 +78,8 @@ func (s *Store) InsertOntMeasurements(ctx context.Context, oltIP string, onts []
 			traffic.ValidOptical(o.ControlRunStatus, o.Temperature),
 			traffic.ValidOptical(o.ControlRunStatus, o.Tx),
 			traffic.ValidOptical(o.ControlRunStatus, o.Rx),
-			int64(o.BytesIn),
-			int64(o.BytesOut),
+			bytesIn,
+			bytesOut,
 		})
 	}
 
@@ -85,10 +95,10 @@ func (s *Store) InsertOntMeasurements(ctx context.Context, oltIP string, onts []
 	return nil
 }
 
-// InsertGponMeasurements stores one IF-MIB sample per GPON port. The ONT status
-// counters read in the same scan cycle are persisted alongside the counters:
-// traffic queries then read a single gpon_measurements row per port and
-// timestamp instead of aggregating one ont_measurements row per ONT.
+// InsertGponMeasurements stores one GPON port sample (Huawei PON MIB) per port.
+// The ONT status counters read in the same scan cycle are persisted alongside
+// the counters: traffic queries then read a single gpon_measurements row per
+// port and timestamp instead of aggregating one ont_measurements row per ONT.
 func (s *Store) InsertGponMeasurements(ctx context.Context, oltIP string, samples []models.GponSample, onts []models.Ont) error {
 	if len(samples) == 0 {
 		return nil
