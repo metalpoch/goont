@@ -26,6 +26,16 @@ var OntScan *cli.Command = &cli.Command{
 		}
 		defer cleanup()
 
+		release, ok, err := store.TryScanLock(ctx)
+		if err != nil {
+			return fmt.Errorf("Error al bloquear el escaneo: %v", err)
+		}
+		if !ok {
+			log.Println("Ya hay un escaneo en curso; se omite este ciclo")
+			return nil
+		}
+		defer release()
+
 		olts, err := store.GetOLTs(ctx)
 		if err != nil {
 			return fmt.Errorf("Error al intentar obtener todos los OLT: %v", err)
@@ -96,7 +106,7 @@ func scanOLT(ctx context.Context, cfg config.Config, store *storage.Store, olt m
 		})
 	}
 
-	if err := store.InsertGponMeasurements(ctx, olt.IP, samples); err != nil {
+	if err := store.InsertGponMeasurements(ctx, olt.IP, samples, onts); err != nil {
 		log.Printf("Error al intentar almacenar el trafico de los puertos gpon de %s (%s) en la base de datos: %v", olt.IP, olt.Name, err)
 	}
 }

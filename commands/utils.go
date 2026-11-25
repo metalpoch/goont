@@ -15,7 +15,7 @@ import (
 func newStore(ctx context.Context) (*storage.Store, func(), error) {
 	cfg := config.Load()
 
-	pool, err := storage.Connect(ctx, cfg.DatabaseURL)
+	pool, err := storage.ConnectScan(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error al intentar conectar a la base de datos: %v", err)
 	}

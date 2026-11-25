@@ -12,17 +12,25 @@ import (
 )
 
 // ontMaxBps calcula el máximo de bps plausible para una ONT a partir de su
-// perfil de línea más reciente. Si el perfil no declara una tasa reconocible,
-// se usa la capacidad del puerto GPON.
+// perfil de línea. El inventario (`onts`) se actualiza en cada escaneo, así que
+// se consulta primero ahí (una fila por clave primaria); solo si no hay perfil
+// se recurre a la última medición. Antes se recorría la hypertable en cada
+// consulta de ONT, lo que duplicaba el coste del endpoint más usado.
 func (s *Store) ontMaxBps(ctx context.Context, oltIP string, gponIdx uint64, ontIdx int, from, to time.Time) float64 {
 	var profile string
 	err := s.pool.QueryRow(ctx, `
-		SELECT line_profile FROM ont_measurements
-		WHERE olt_ip = $1 AND gpon_idx = $2 AND ont_idx = $3 AND time >= $4 AND time <= $5
-		ORDER BY time DESC LIMIT 1
-	`, oltIP, gponIdx, ontIdx, from, to).Scan(&profile)
-	if err != nil {
-		return traffic.MaxGponBps
+		SELECT line_profile FROM onts
+		WHERE olt_ip = $1 AND gpon_idx = $2 AND ont_idx = $3
+	`, oltIP, gponIdx, ontIdx).Scan(&profile)
+	if err != nil || profile == "" {
+		err = s.pool.QueryRow(ctx, `
+			SELECT line_profile FROM ont_measurements
+			WHERE olt_ip = $1 AND gpon_idx = $2 AND ont_idx = $3 AND time >= $4 AND time <= $5
+			ORDER BY time DESC LIMIT 1
+		`, oltIP, gponIdx, ontIdx, from, to).Scan(&profile)
+		if err != nil {
+			return traffic.MaxGponBps
+		}
 	}
 	rate, ok := traffic.LineRateBps(profile)
 	if !ok {
@@ -152,10 +160,10 @@ func (s *Store) GponTrafficData(ctx context.Context, oltIP string, gponIdx uint6
 			SELECT COUNT(*) AS total FROM onts WHERE olt_ip = $1 AND gpon_idx = $2
 		), c AS (
 			SELECT time,
-			       COUNT(*) FILTER (WHERE run_status = 1)  AS active,
-			       COUNT(*) FILTER (WHERE run_status = 2)  AS inactive,
-			       COUNT(*) FILTER (WHERE run_status = -1) AS error
-			FROM ont_measurements
+			       MAX(count_active)   AS active,
+			       MAX(count_inactive) AS inactive,
+			       MAX(count_error)    AS error
+			FROM gpon_measurements
 			WHERE olt_ip = $1 AND gpon_idx = $2 AND time >= $3 AND time <= $4
 			GROUP BY time
 		)
@@ -219,10 +227,10 @@ func (s *Store) OltTraffic(ctx context.Context, oltIP string, from, to time.Time
 			SELECT COUNT(*) AS total FROM onts WHERE olt_ip = $1
 		), c AS (
 			SELECT time,
-			       COUNT(*) FILTER (WHERE run_status = 1)  AS active,
-			       COUNT(*) FILTER (WHERE run_status = 2)  AS inactive,
-			       COUNT(*) FILTER (WHERE run_status = -1) AS error
-			FROM ont_measurements
+			       SUM(count_active)::bigint   AS active,
+			       SUM(count_inactive)::bigint AS inactive,
+			       SUM(count_error)::bigint    AS error
+			FROM gpon_measurements
 			WHERE olt_ip = $1 AND time >= $2 AND time <= $3
 			GROUP BY time
 		)

@@ -22,12 +22,37 @@ func GetTrafficGpons(w http.ResponseWriter, r *http.Request) {
 
 	measurements, err := store.OltTraffic(r.Context(), ip, dates.InitDate, dates.EndDate)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(measurements)
+}
+
+// GetTrafficPorts - Serie de trafico de todos los puertos GPON del OLT en una
+// sola respuesta, para que el Dashboard no tenga que pedir un puerto por vez.
+func GetTrafficPorts(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+	if ip == "" {
+		http.Error(w, "IP parameter required", http.StatusBadRequest)
+		return
+	}
+
+	dates, err := parseDate(r.URL.Query().Get("initDate"), r.URL.Query().Get("endDate"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ports, err := store.PortsTraffic(r.Context(), ip, dates.InitDate, dates.EndDate)
+	if err != nil {
+		writeServerError(w, r, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ports)
 }
 
 // GetTrafficONTS - Trafico de un puerto GPON (contadores del puerto) y estado de sus ONT
@@ -53,7 +78,7 @@ func GetTrafficONTS(w http.ResponseWriter, r *http.Request) {
 
 	measurements, err := store.GponTrafficData(r.Context(), ip, gponIdx, dates.InitDate, dates.EndDate)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 
@@ -90,7 +115,7 @@ func GetTrafficONT(w http.ResponseWriter, r *http.Request) {
 
 	measurements, err := store.OntTraffic(r.Context(), ip, gponIdx, ontIdx, dates.InitDate, dates.EndDate)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 

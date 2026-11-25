@@ -67,6 +67,15 @@ type OltMeasurement struct {
 	CountUnmeasured int       `json:"count_unmeasured"`
 }
 
+// GponPortTraffic groups the traffic series of one GPON port. It is the item
+// type of GET /api/v1/traffic/{ip}/ports, which returns every port of an OLT in
+// one response instead of one request per port.
+type GponPortTraffic struct {
+	GponIdx       uint64            `json:"gpon_idx"`
+	GponInterface string            `json:"gpon_interface"`
+	Measurements  []GponMeasurement `json:"measurements"`
+}
+
 type OltPort struct {
 	GponIdx       uint64    `json:"gpon_idx"`
 	GponInterface string    `json:"gpon_interface"`

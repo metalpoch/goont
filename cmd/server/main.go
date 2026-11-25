@@ -32,16 +32,28 @@ func main() {
 	mux := http.NewServeMux()
 	setupRoutes(mux)
 
-	handler := middleware.Logging(mux)
+	cacheCfg := middleware.CacheConfigFromEnv()
+	handler := middleware.Timeout(110 * time.Second)(mux)
+	handler = middleware.NewCache(cacheCfg)(handler)
+	handler = middleware.Logging(handler)
 	handler = middleware.RecoverPanic(handler)
 	handler = middleware.CORS(handler)
 
+	if cacheCfg.TTL > 0 {
+		log.Printf("Caché en memoria activa: TTL %s, máximo %d MiB", cacheCfg.TTL, cacheCfg.MaxBytes>>20)
+	}
+
 	server := &http.Server{
-		Addr:         cfg.Addr,
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:    cfg.Addr,
+		Handler: handler,
+		// Las consultas de tráfico agregan días de muestras y tardan decenas
+		// de segundos: 15 s cortaba la respuesta. El plazo real lo impone el
+		// contexto por petición (middleware.Timeout) y la cancelación del
+		// cliente.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -73,6 +85,7 @@ func setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/olt/{ip}/onts", handlers.GetOLTONTs)
 
 	mux.HandleFunc("GET /api/v1/traffic/{ip}", handlers.GetTrafficGpons)
+	mux.HandleFunc("GET /api/v1/traffic/{ip}/ports", handlers.GetTrafficPorts)
 	mux.HandleFunc("GET /api/v1/traffic/{ip}/{gpon}", handlers.GetTrafficONTS)
 	mux.HandleFunc("GET /api/v1/traffic/{ip}/{gpon}/{ont}", handlers.GetTrafficONT)
 

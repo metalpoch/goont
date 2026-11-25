@@ -16,7 +16,7 @@ func SetStore(s *storage.Store) {
 func GetAllOLT(w http.ResponseWriter, r *http.Request) {
 	olts, err := store.GetInfoOLTs(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 
@@ -34,7 +34,7 @@ func GetOLT(w http.ResponseWriter, r *http.Request) {
 
 	olt, err := store.GetOLTByID(r.Context(), ip)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 

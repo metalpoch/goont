@@ -71,9 +71,19 @@ PostgreSQL + TimescaleDB. Las tablas se crean automáticamente al primer arranqu
 - `olts`: registro de OLTs (IP, community, timeouts)
 - `onts`: identidad de cada ONT visto (IP, puerto GPON, índice, serial)
 - `ont_measurements`: hypertable con mediciones por ONT (contadores, señal, estado)
-- `gpon_measurements`: hypertable con contadores de tráfico por puerto GPON (IF-MIB)
+- `gpon_measurements`: hypertable con contadores de tráfico por puerto GPON (IF-MIB) y los conteos active/inactive/error del mismo escaneo
 
 Compresión automática activada (3 días para ONT, 7 para GPON). El bps se calcula en SQL con `LAG` sobre los contadores, por lo que las consultas por rango de fechas son rápidas incluso con millones de filas.
+
+### Migraciones
+
+`Migrate` se ejecuta en cada arranque del servidor y de cada `ont scan`, y es idempotente. Tres detalles importan en producción:
+
+- **Un solo `Migrate` a la vez**: toma un bloqueo de sesión (`pg_advisory_lock`) porque el servidor y los `ont scan` del cron migran a la vez, y dos `CREATE INDEX IF NOT EXISTS` simultáneos chocan con `duplicate key value violates unique constraint "pg_class_relname_nsp_index"`. El segundo arranque espera al primero.
+- **Backfill en una transacción**: las migraciones que reescriben histórico (por ejemplo el relleno de `count_*`) van en una única transacción; si falla, se revierte entero y el siguiente arranque lo reintenta. Mientras corre, el servidor no abre el puerto.
+- **Límite de descompresión**: TimescaleDB limita por sentencia cuántas tuplas puede descomprimir un `UPDATE` (`timescaledb.max_tuples_decompressed_per_dml_transaction`, 100 000 por defecto) y devuelve `SQLSTATE 53400` si se supera. Las migraciones que tocan chunks comprimidos lo desactivan con `SET LOCAL ... = 0` dentro de su transacción.
+
+Con tablas grandes (cientos de millones de filas) una migración así puede tardar decenas de minutos: conviene parar el cron de `ont scan` y hacerla en ventana de mantenimiento.
 
 ## Configuración
 
@@ -85,6 +95,9 @@ Variables de entorno:
 | `GOONT_ADDR`       | `0.0.0.0:8080`                                                | Dirección de escucha del servidor HTTP       |
 | `GOONT_SNMP_CONNS` | `10`                                                          | Conexiones SNMP simultáneas por OLT          |
 | `GOONT_MAX_OLTS`   | `32`                                                          | OLTs escaneándose en paralelo                |
+| `GOONT_DB_MAX_CONNS` | `10`                                                        | Conexiones del pool del servidor API (la CLI usa 3) |
+| `GOONT_CACHE_TTL`  | `60`                                                          | Segundos que se cachean las respuestas JSON (`0` desactiva) |
+| `GOONT_CACHE_MB`   | `64`                                                          | Memoria máxima de la caché en MiB                  |
 
 ## Despliegue
 
@@ -141,15 +154,20 @@ Orden recomendado: agregar OLT → `ont scan` manual de prueba → configurar el
 | `GET /api/v1/olt/{ip}/ports` | Puertos GPON del OLT con conteo de ONTs |
 | `GET /api/v1/olt/{ip}/onts?q=&gpon=` | Inventario de ONTs, buscable por descripción (DNI/RIF) o serial |
 | `GET /api/v1/traffic/{ip}` | Tráfico total del OLT (suma de sus puertos) |
+| `GET /api/v1/traffic/{ip}/ports` | Serie de todos los puertos GPON en una sola respuesta |
 | `GET /api/v1/traffic/{ip}/{gpon}` | Tráfico del puerto GPON + conteo de ONTs por estado |
 | `GET /api/v1/traffic/{ip}/{gpon}/{ont}` | Tráfico y señal óptica de un ONT |
 | `GET /api/v1/health` | Estado del servicio |
 
 Los endpoints de tráfico exigen `initDate` y `endDate` (formato RFC3339) y devuelven intervalos con bytes y bps calculados en la base de datos: se necesita al menos **dos escaneos** para que haya tráfico consultable. Los intervalos con tráfico físicamente imposible (> 2.5 Gbps o wraps de contador) se omiten, el OLT solo suma intervalos válidos, los campos ópticos sin medición se sirven como `null` y las filas incluyen `count_unmeasured`. El contrato completo está en [`docs/API.md`](docs/API.md).
 
+Para las gráficas por puerto, `GET /api/v1/traffic/{ip}/ports` devuelve todas las series GPON del OLT en **una sola respuesta** (los mismos campos que el endpoint individual), de modo que el Dashboard no tenga que hacer N peticiones.
+
 ```bash
 curl 'https://<servidor>/api/v1/traffic/192.168.1.1?initDate=2026-09-04T00:00:00Z&endDate=2026-09-05T00:00:00Z'
 ```
+
+Las respuestas JSON `GET` se cachean en memoria del proceso (`GOONT_CACHE_TTL`, por defecto 60 s; `/health` nunca se cachea). Un rango de fechas que ya terminó se guarda 1 hora, porque sus datos no cambian. Cada respuesta indica `X-Cache: HIT|MISS` (y `Age` en los aciertos) para diagnosticar; si se ven consultas repetidas como `MISS`, la caché no está entrando en juego.
 
 Variables del `.env` (todas opcionales, hay defaults):
 
@@ -159,6 +177,9 @@ Variables del `.env` (todas opcionales, hay defaults):
 | `GOONT_ADDR`       | `0.0.0.0:8080`                              | Dirección de escucha del servidor API              |
 | `GOONT_SNMP_CONNS` | `10`                                        | Conexiones SNMP simultáneas por OLT                |
 | `GOONT_MAX_OLTS`   | `32`                                        | OLTs escaneándose en paralelo                      |
+| `GOONT_DB_MAX_CONNS` | `10`                                      | Conexiones del pool del servidor API (la CLI usa 3) |
+| `GOONT_CACHE_TTL`  | `60`                                        | Segundos que se cachean las respuestas JSON (`0` desactiva) |
+| `GOONT_CACHE_MB`   | `64`                                        | Memoria máxima de la caché en MiB                  |
 
 ## Dependencias
 

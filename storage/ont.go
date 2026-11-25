@@ -85,27 +85,68 @@ func (s *Store) InsertOntMeasurements(ctx context.Context, oltIP string, onts []
 	return nil
 }
 
-func (s *Store) InsertGponMeasurements(ctx context.Context, oltIP string, samples []models.GponSample) error {
+// InsertGponMeasurements stores one IF-MIB sample per GPON port. The ONT status
+// counters read in the same scan cycle are persisted alongside the counters:
+// traffic queries then read a single gpon_measurements row per port and
+// timestamp instead of aggregating one ont_measurements row per ONT.
+func (s *Store) InsertGponMeasurements(ctx context.Context, oltIP string, samples []models.GponSample, onts []models.Ont) error {
 	if len(samples) == 0 {
 		return nil
 	}
 
+	counts := countOntStatuses(onts)
+
 	rows := make([][]any, 0, len(samples))
 	for _, m := range samples {
+		c := counts[m.GponIdx]
 		rows = append(rows, []any{
 			m.Time,
 			oltIP,
 			int64(m.GponIdx),
 			int64(m.BytesIn),
 			int64(m.BytesOut),
+			c.active,
+			c.inactive,
+			c.error,
 		})
 	}
 
-	cols := []string{"time", "olt_ip", "gpon_idx", "bytes_in", "bytes_out"}
+	cols := []string{
+		"time", "olt_ip", "gpon_idx", "bytes_in", "bytes_out",
+		"count_active", "count_inactive", "count_error",
+	}
 
 	if _, err := s.pool.CopyFrom(ctx, pgx.Identifier{"gpon_measurements"}, cols, pgx.CopyFromRows(rows)); err != nil {
 		return fmt.Errorf("copy gpon measurements: %w", err)
 	}
 
 	return nil
+}
+
+type ontStatusCounts struct {
+	active   int32
+	inactive int32
+	error    int32
+}
+
+// countOntStatuses tallies run_status per GPON port for the ONTs read in this
+// scan cycle. Ports whose ONT query failed have no entries and stay at zero,
+// which renders all their inventory as count_unmeasured (same as before).
+func countOntStatuses(onts []models.Ont) map[uint64]ontStatusCounts {
+	counts := make(map[uint64]ontStatusCounts)
+	for _, o := range onts {
+		c := counts[o.GponIdx]
+		if o.ControlRunStatus != nil {
+			switch *o.ControlRunStatus {
+			case 1:
+				c.active++
+			case 2:
+				c.inactive++
+			case -1:
+				c.error++
+			}
+		}
+		counts[o.GponIdx] = c
+	}
+	return counts
 }

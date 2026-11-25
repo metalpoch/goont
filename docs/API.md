@@ -165,6 +165,38 @@ GPON, más el conteo de ONTs.
 ]
 ```
 
+### `GET /api/v1/traffic/{ip}/ports`
+
+Serie de tráfico de **todos** los puertos GPON del OLT en una sola respuesta.
+Evita que el Dashboard haga una petición por puerto: cada puerto conserva los
+mismos intervalos y contadores que devolvería `/traffic/{ip}/{gpon}`.
+
+```json
+[
+  {
+    "gpon_idx": 1,
+    "gpon_interface": "GPON0/1/1",
+    "measurements": [
+      {
+        "time": "2026-09-05T12:00:10Z",
+        "gpon_interface": "GPON0/1/1",
+        "bytes_in": 250000000,
+        "bytes_out": 125000000,
+        "bps_in": 200000000,
+        "bps_out": 100000000,
+        "count_active": 40,
+        "count_inactive": 1,
+        "count_error": 0,
+        "count_unmeasured": 1
+      }
+    ]
+  }
+]
+```
+
+Solo aparecen los puertos con al menos un intervalo válido en el rango. El
+`gpon_interface` del objeto de puerto es el mismo que el de cada medición.
+
 ### `GET /api/v1/traffic/{ip}/{gpon}`
 
 Tráfico del puerto GPON (contadores IF-MIB del puerto) y conteo de sus ONTs.

@@ -15,7 +15,7 @@ func GetOLTPorts(w http.ResponseWriter, r *http.Request) {
 
 	olt, err := store.GetOLTByID(r.Context(), ip)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 	if olt == nil {
@@ -25,7 +25,7 @@ func GetOLTPorts(w http.ResponseWriter, r *http.Request) {
 
 	ports, err := store.ListOltPorts(r.Context(), ip)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 
@@ -43,7 +43,7 @@ func GetOLTONTs(w http.ResponseWriter, r *http.Request) {
 
 	olt, err := store.GetOLTByID(r.Context(), ip)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 	if olt == nil {
@@ -65,7 +65,7 @@ func GetOLTONTs(w http.ResponseWriter, r *http.Request) {
 
 	onts, err := store.ListOnts(r.Context(), ip, gponIdx, query)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeServerError(w, r, err)
 		return
 	}
 
